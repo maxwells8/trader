@@ -28,14 +28,17 @@ class Worker(object):
 
         self.experience = []
 
-    def start(self):
-
+    def run(self):
+        value = self.environment.value
         while True:
-            time_states, open_orders, balance, value = self.environment.get_state()
+            state = self.environment.get_state()
+            if not state:
+                return value
+            time_states, open_orders, balance, value = state
 
             market_values = []
             for state in time_states:
-                market_values.append(torch.from_numpy(state.as_ndarray()).view(1, 1, state.shape[0]))
+                market_values.append(torch.from_numpy(state.as_ndarray()).float().view(1, 1, state.shape[0]))
 
             market_encoding = self.market_encoder.forward(market_values)
 
@@ -66,4 +69,6 @@ class Worker(object):
 
                 if action == 1:
                     closed_orders.append(order_i)
+
+            self.environment.step(placed_order, closed_orders)
 
