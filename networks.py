@@ -47,8 +47,7 @@ class MarketEncoder(nn.Module):
 
 class Actor(nn.Module):
     """
-    takes a market encoding and the percentage of the balance not currently in an order (the available balance),
-    and outputs a value for percentage of the available balance to buy and sell
+    takes a market encoding and outputs a value for percentage of the available balance to buy and sell
     """
 
     def __init__(self, d_model):
@@ -56,14 +55,12 @@ class Actor(nn.Module):
 
         self.d_model = d_model
 
-        self.fc1 = nn.Linear(self.d_model + 1, self.d_model)
+        self.fc1 = nn.Linear(self.d_model, self.d_model)
         self.fc2 = nn.Linear(self.d_model, self.d_model)
         self.fc3 = nn.Linear(self.d_model, 2)
 
-    def forward(self, market_encoding, balance):
-
-        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, self.d_model),
-                                             balance.view(-1, 1)])))
+    def forward(self, market_encoding):
+        x = F.leaky_relu(self.fc1(market_encoding.view(1, -1)))
         x = F.leaky_relu(self.fc2(x)) + x
         x = F.sigmoid(self.fc3(x))
 
@@ -72,8 +69,7 @@ class Actor(nn.Module):
 
 class Critic(nn.Module):
     """
-    takes a market encoding, an Actor's action, and the percentage of money not in an order (the available balance),
-    and outputs the advantage and value of buying, selling, and neither
+    takes a market encoding and a proposed action, and outputs the advantage and value of buying, selling, and neither
 
     the reward is defined as the ratio between the total balance at t time steps and at open
     """
@@ -83,7 +79,7 @@ class Critic(nn.Module):
 
         self.d_model = d_model
 
-        self.fc1 = nn.Linear(self.d_model + 3, self.d_model)
+        self.fc1 = nn.Linear(self.d_model + 2, self.d_model)
 
         self.advantage1 = nn.Linear(self.d_model, self.d_model)
         self.advantage2 = nn.Linear(self.d_model, 3)
@@ -91,17 +87,16 @@ class Critic(nn.Module):
         self.value1 = nn.Linear(self.d_model, self.d_model)
         self.value2 = nn.Linear(self.d_model, 1)
 
-    def forward(self, market_encoding, action, balance):
+    def forward(self, market_encoding, action):
 
-        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, self.d_model),
-                                             action.view(-1, 2),
-                                             balance.view(-1, 1)])))
+        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(1, -1),
+                                             action.view(1, -1)], 1)))
 
         advantage = F.leaky_relu(self.advantage1(x)) + x
-        advantage = F.leaky_relu(self.advantage2(advantage)) + advantage
+        advantage = self.advantage2(advantage)
 
         value = F.leaky_relu(self.value1(x)) + x
-        value = F.leaky_relu(self.value2(value)) + value
+        value = self.value2(value)
 
         return advantage, value
 
@@ -140,16 +135,31 @@ class OrderNetwork(nn.Module):
         combined = F.leaky_relu(self.combine(torch.cat([order_vec, market_encoding.view(-1, self.d_model)])))
 
         advantage = F.leaky_relu(self.advantage1(combined)) + combined
-        advantage = F.leaky_relu(self.advantage2(advantage)) + advantage
+        advantage = self.advantage2(advantage)
 
         value = F.leaky_relu(self.value1(combined)) + combined
-        value = F.leaky_relu(self.value2(value)) + value
+        value = self.value2(value)
 
         return advantage, value
 
 
+# """
+ME = MarketEncoder(8, 256, 2)
+A = Actor(256)
+C = Critic(256)
+
+inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]
+
+market_encoding = ME.forward(inputs)
+proposed_actions = A.forward(market_encoding)
+print(proposed_actions)
+proposed_actions += torch.randn(1, 2) * 0.05
+print(proposed_actions)
+Q_actions = C.forward(market_encoding, proposed_actions)
+print(int(Q_actions[0].max(1)[1]))
+# """
 """
-ME = MarketEncoder(6, 256, 2)
+ME = MarketEncoder(8, 256, 2)
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]
 n = 10
 t0 = time.time()

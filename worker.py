@@ -12,7 +12,7 @@ import redis
 
 class Worker(object):
 
-    def __init__(self, source, window=400):
+    def __init__(self, source, name, window=400):
 
         self.environment = Env(source, window)
         self.market_encoder = torch.load('models/market_encoder.pt')
@@ -21,14 +21,49 @@ class Worker(object):
         self.order = torch.load('models/order.pt')
 
         self.server = redis.Redis("localhost")
+        self.name = name.decode("utf-8")
+        self.place_epsilon = self.server.get("place_epsilon_" + name)
+        self.close_epsilon = self.server.get("close_epsilon_" + name)
+        self.sigma = self.server.get("sigma_" + name)
 
         self.experience = []
 
     def start(self):
 
         while True:
-            time_states, orders, balance, value = self.environment.get_state()
+            time_states, open_orders, balance, value = self.environment.get_state()
 
             market_values = []
             for state in time_states:
-                market_values.append(torch.from_numpy(state).view(1, 1, state.shape[0]))
+                market_values.append(torch.from_numpy(state.as_ndarray()).view(1, 1, state.shape[0]))
+
+            market_encoding = self.market_encoder.forward(market_values)
+
+            proposed_actions = self.actor.forward(market_encoding, torch.tensor([balance]), torch.tensor([value]))
+            proposed_actions += torch.randn(1, 2) * self.sigma
+
+            Q_actions = self.critic.forward(market_encoding, proposed_actions)
+
+            if np.random.rand() < self.place_epsilon:
+                action = np.random.randint(0, 3)
+            else:
+                action = int(Q_actions.max(1)[1])
+
+            if action == 0:
+                placed_order = [0, float(proposed_actions[0, 0])]
+            elif action == 1:
+                placed_order = [1, float(proposed_actions[0, 1])]
+            else:
+                placed_order = [2]
+
+            closed_orders = []
+            for order_i in range(len(open_orders)):
+                advantage = self.order.forward(market_encoding, torch.from_numpy(open_orders[order_i].as_ndarray()))[0]
+
+                action = int(advantage.max(1)[1])
+                if np.random.rand() < self.close_epsilon:
+                    action = np.random.randint(0, 2)
+
+                if action == 1:
+                    closed_orders.append(order_i)
+

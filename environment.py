@@ -29,7 +29,7 @@ class Env(object):
                                    low=self.data['low'][self.cur_i],
                                    close=self.data['close'][self.cur_i],
                                    time=self.data['time'][self.cur_i],
-                                   spread=self.get_rand_spread())
+                                   spread=self._get_rand_spread())
 
         self.time_states.append(new_time_state)
 
@@ -39,13 +39,13 @@ class Env(object):
 
         return self.time_states, self.orders, self.balance, self.value
 
-    def step(self, placed_order, closed_orders):
-        if placed_order[0] == 1:
+    def step(self, placed_order, closed_orders_indices):
+        if placed_order[0] == 0:
             self.buy(placed_order[1])
-        elif placed_order[0] == -1:
+        elif placed_order[0] == 1:
             self.sell(placed_order[1])
 
-        for order_i in sorted(closed_orders, reverse=True):
+        for order_i in sorted(closed_orders_indices, reverse=True):
             self.close_order(order_i)
 
         self.cur_i += 1
@@ -71,7 +71,7 @@ class Env(object):
         del self.orders[order_i]
 
     @staticmethod
-    def get_rand_spread():
+    def _get_rand_spread():
         return np.random.gamma(3, 2 / 10000)
 
 
@@ -81,10 +81,10 @@ class Order(object):
 
         self.quantity = quantity
 
-        self.buy = buy
-
         self.open_price = open_price
         self.open_time = open_time
+
+        self.buy = buy
 
     def as_ndarray(self):
         return np.array([self.open_time, self.open_price, self.quantity, int(self.buy)])
@@ -98,14 +98,16 @@ class Order(object):
 
 class TimeState(object):
 
-    def __init__(self, open, high, low, close, time, spread):
+    def __init__(self, open, high, low, close, time, spread, balance, value):
         self.open = open
         self.high = high
         self.low = low
         self.close = close
         self.time = time
         self.spread = spread
+        self.balance = balance
+        self.value = value
 
     def as_ndarray(self):
-        return np.array([self.open, self.high, self.low, self.close, self.time, self.spread])
+        return np.array([self.open, self.high, self.low, self.close, self.time, self.spread, self.balance, self.value])
 
