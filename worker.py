@@ -27,10 +27,17 @@ class Worker(object):
         self.close_epsilon = self.server.get("close_epsilon_" + name)
         self.sigma = self.server.get("sigma_" + name)
 
+        self.replay = ReplayMemory()
+
     def run(self):
         value = self.environment.value
+
         replay_time_states = []
         replay_orders = []
+        replay_queried = None
+        replay_orders_actions = []
+        replay_place_action = None
+        replay_reward = 0
         while True:
             state = self.environment.get_state()
             if not state:
@@ -41,12 +48,23 @@ class Worker(object):
             time_states, open_orders, balance, value, reward = state
 
             replay_time_states.append(time_states[-1])
+            replay_reward = reward
+            # add experience
+            self.replay.add_experience(Experience(replay_time_states,
+                                                  replay_orders,
+                                                  replay_queried,
+                                                  replay_orders_actions,
+                                                  replay_place_action,
+                                                  replay_reward))
 
             market_encoding = self.market_encoder.forward(time_states)
 
             proposed_actions = self.actor.forward(market_encoding, torch.tensor([balance]), torch.tensor([value]))
             proposed_actions += torch.randn(1, 2) * self.sigma
 
+            replay_queried = proposed_actions
+
+            # buy, sell, or neither
             Q_actions = self.critic.forward(market_encoding, proposed_actions)
 
             if np.random.rand() < self.place_epsilon:
@@ -61,7 +79,12 @@ class Worker(object):
             else:
                 placed_order = [2]
 
+            replay_place_action = placed_order
+            replay_orders = open_orders
+
+            replay_orders_actions = []
             closed_orders = []
+            # go through each order
             for order_i in range(len(open_orders)):
                 advantage = self.order.forward(market_encoding, torch.from_numpy(open_orders[order_i].as_ndarray()))[0]
 
@@ -69,8 +92,11 @@ class Worker(object):
                 if np.random.rand() < self.close_epsilon:
                     action = np.random.randint(0, 2)
 
-                if action == 1:
+                if action == 0:
+                    replay_orders_actions.append(action)
+                elif action == 1:
                     closed_orders.append(order_i)
+                    replay_orders_actions.append(action)
 
             self.environment.step(placed_order, closed_orders)
 
@@ -81,8 +107,7 @@ Experience = namedtuple('Experience',
                          'queried_amount',
                          'orders_actions',
                          'place_action',
-                         'reward',
-                         'delta'))
+                         'reward'))
 
 
 class ReplayMemory(object):

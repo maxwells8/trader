@@ -55,6 +55,7 @@ class Env(object):
         if len(self.time_states) == self.time_window:
             del self.time_states[0]
 
+        self.prev_value = self.value
         self.calculate_value()
 
         new_time_state = TimeState(open=self.data['open'][self.cur_i],
