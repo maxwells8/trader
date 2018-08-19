@@ -5,8 +5,7 @@ import time
 
 class Env(object):
 
-    def __init__(self, source, spread_func=lambda _:np.random.gamma(3, 2 / 10000), time_window=512):
-
+    def __init__(self, source, spread_func=lambda _:Env._get_rand_spread(), time_window=512):
         self.data = pd.DataFrame(pd.read_csv(source))
 
         self.time_window = time_window
@@ -15,6 +14,7 @@ class Env(object):
         self.time_states = []
         self.orders = []
         self.balance = 1
+        self.prev_value = 1
         self.value = 1
 
         self.spread_func = spread_func
@@ -35,7 +35,7 @@ class Env(object):
         if self.cur_i == self.data.shape[0]:
             return False
 
-        return self.time_states, self.orders, self.balance, self.calculate_value()
+        return self.time_states, self.orders, self.balance, self.calculate_value(), self.reward()
 
     def step(self, placed_order, closed_orders_indices):
         if placed_order[0] == 0:
@@ -93,6 +93,10 @@ class Env(object):
             self.value += order.value(self.time_states[-1].close, self.time_states[-1].spread)
 
         return self.value
+
+    def reward(self):
+        self.calculate_value()
+        return self.value - self.prev_value
 
     @staticmethod
     def _get_rand_spread():

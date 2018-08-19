@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 import time
+from collections import namedtuple
 from networks import *
 from environment import *
 import redis
@@ -12,7 +13,7 @@ import redis
 
 class Worker(object):
 
-    def __init__(self, source, name, window=400):
+    def __init__(self, source, name, window=512):
 
         self.environment = Env(source, window)
         self.market_encoder = torch.load('models/market_encoder.pt')
@@ -26,15 +27,13 @@ class Worker(object):
         self.close_epsilon = self.server.get("close_epsilon_" + name)
         self.sigma = self.server.get("sigma_" + name)
 
-        self.experience = []
-
     def run(self):
         value = self.environment.value
         while True:
             state = self.environment.get_state()
             if not state:
                 return value
-            time_states, open_orders, balance, value = state
+            time_states, open_orders, balance, value, reward = state
 
             market_values = []
             for state in time_states:
@@ -71,4 +70,27 @@ class Worker(object):
                     closed_orders.append(order_i)
 
             self.environment.step(placed_order, closed_orders)
+
+
+Experience = namedtuple('Experience',
+                        ('time_states',
+                         'orders',
+                         'queried_amount',
+                         'orders_actions',
+                         'place_action',
+                         'reward',
+                         'delta'))
+
+
+class ReplayMemory(object):
+
+    def __init__(self):
+        self.experience = []
+
+    def add_experience(self, experience):
+        self.experience.append(experience)
+
+    def push(self, redis_server):
+        pass
+
 
