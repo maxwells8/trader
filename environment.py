@@ -1,3 +1,4 @@
+import torch
 import pandas as pd
 import numpy as np
 import time
@@ -28,7 +29,7 @@ class Env(object):
                                      balance=self.balance,
                                      value=self.value)
 
-        self.time_states.append(first_time_state)
+        self.time_states.append(first_time_state.as_tensor())
 
     def get_state(self):
 
@@ -65,7 +66,7 @@ class Env(object):
                                    balance=self.balance,
                                    value=self.value)
 
-        self.time_states.append(new_time_state)
+        self.time_states.append(new_time_state.as_tensor())
 
     def buy(self, amount):
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
@@ -137,4 +138,21 @@ class TimeState(object):
         self.value = value
 
     def as_ndarray(self):
-        return np.array([self.open, self.high, self.low, self.close, self.time, self.spread, self.balance, self.value])
+        return np.array([self.open,
+                         self.high,
+                         self.low,
+                         self.close,
+                         self.time,
+                         self.spread,
+                         self.balance,
+                         self.value])
+
+    def as_tensor(self):
+        return torch.Tensor([self.open,
+                             self.high,
+                             self.low,
+                             self.close,
+                             self.time,
+                             self.spread,
+                             self.balance,
+                             self.value]).float().view(1, 1, -1)

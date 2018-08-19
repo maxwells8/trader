@@ -29,17 +29,20 @@ class Worker(object):
 
     def run(self):
         value = self.environment.value
+        replay_time_states = []
+        replay_orders = []
         while True:
             state = self.environment.get_state()
             if not state:
                 return value
+
+            replay_time_states = time_states
+
             time_states, open_orders, balance, value, reward = state
 
-            market_values = []
-            for state in time_states:
-                market_values.append(torch.from_numpy(state.as_ndarray()).float().view(1, 1, state.shape[0]))
+            replay_time_states.append(time_states[-1])
 
-            market_encoding = self.market_encoder.forward(market_values)
+            market_encoding = self.market_encoder.forward(time_states)
 
             proposed_actions = self.actor.forward(market_encoding, torch.tensor([balance]), torch.tensor([value]))
             proposed_actions += torch.randn(1, 2) * self.sigma
