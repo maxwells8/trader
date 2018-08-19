@@ -100,6 +100,13 @@ class Worker(object):
 
             self.environment.step(placed_order, closed_orders)
 
+            if int(self.server.get('update').decode("utf-8")):
+                self.replay.push(self.server)
+                self.market_encoder = torch.load('models/market_encoder.pt')
+                self.actor = torch.load('models/actor.pt')
+                self.critic = torch.load('models/critic.pt')
+                self.order = torch.load('models/order.pt')
+
 
 Experience = namedtuple('Experience',
                         ('time_states',
@@ -113,12 +120,14 @@ Experience = namedtuple('Experience',
 class ReplayMemory(object):
 
     def __init__(self):
-        self.experience = []
+        self.experiences = []
 
     def add_experience(self, experience):
-        self.experience.append(experience)
+        self.experiences.append(experience)
 
-    def push(self, redis_server):
-        pass
+    def push(self, server):
 
+        for experience in self.experiences:
+            server.lpush('ER', experience)
 
+        self.experiences = []
