@@ -150,10 +150,10 @@ A = Actor(256)
 C = Critic(256)
 O = OrderNetwork(256, 4)
 
-inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]
+inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(512)]
 orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(20)]
 
-n = 10
+n = 100
 t0 = time.time()
 for _ in range(n):
 

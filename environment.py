@@ -5,7 +5,7 @@ import time
 
 class Env(object):
 
-    def __init__(self, source, time_window=400):
+    def __init__(self, source, time_window=512):
 
         self.data = pd.DataFrame(pd.read_csv(source))
 
