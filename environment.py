@@ -5,7 +5,7 @@ import time
 
 class Env(object):
 
-    def __init__(self, source, time_window=400):
+    def __init__(self, source, spread_func=lambda _:np.random.gamma(3, 2 / 10000), time_window=512):
 
         self.data = pd.DataFrame(pd.read_csv(source))
 
@@ -17,12 +17,14 @@ class Env(object):
         self.balance = 1
         self.value = 1
 
+        self.spread_func = spread_func
+
         first_time_state = TimeState(open=self.data['open'][self.cur_i],
                                      high=self.data['high'][self.cur_i],
                                      low=self.data['low'][self.cur_i],
                                      close=self.data['close'][self.cur_i],
                                      time=self.data['time'][self.cur_i],
-                                     spread=self._get_rand_spread(),
+                                     spread=self.spread_func(None),
                                      balance=self.balance,
                                      value=self.value)
 
@@ -59,7 +61,7 @@ class Env(object):
                                    low=self.data['low'][self.cur_i],
                                    close=self.data['close'][self.cur_i],
                                    time=self.data['time'][self.cur_i],
-                                   spread=self._get_rand_spread(),
+                                   spread=self.spread_func(None),
                                    balance=self.balance,
                                    value=self.value)
 
