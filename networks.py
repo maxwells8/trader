@@ -144,16 +144,16 @@ class OrderNetwork(nn.Module):
         return advantage, value
 
 
-"""
+# """
 ME = MarketEncoder(8, 256, 2)
 A = Actor(256)
 C = Critic(256)
 O = OrderNetwork(256, 4)
 
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(512)]
-orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(20)]
+orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(64)]
 
-n = 100
+n = 10
 t0 = time.time()
 for _ in range(n):
 
@@ -164,7 +164,7 @@ for _ in range(n):
         close = O.forward(market_encoding, order)
 
 print((time.time() - t0) / n)
-"""
+# """
 """
 ME = MarketEncoder(8, 256, 2)
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]
