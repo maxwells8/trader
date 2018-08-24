@@ -11,6 +11,12 @@ from environment import *
 import redis
 
 
+"""
+TODO
+get cpu core
+"""
+
+
 class Worker(object):
 
     def __init__(self, source, name, window=512):
