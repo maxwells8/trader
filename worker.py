@@ -91,6 +91,9 @@ class Worker(object):
             replay_orders_actions = []
             closed_orders = []
             # go through each order
+            """
+            get this nasty ass for loop out of here
+            """
             for order_i in range(len(open_orders)):
                 advantage = self.order.forward(market_encoding, torch.from_numpy(open_orders[order_i].as_ndarray()))[0]
 

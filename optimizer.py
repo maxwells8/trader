@@ -13,6 +13,7 @@ import redis
 
 """
 Keep a target network. Update it using an exponential moving average.
+Convert experience to cuda tensors.
 """
 
 
