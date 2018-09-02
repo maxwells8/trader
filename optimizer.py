@@ -63,6 +63,7 @@ class Optimizer(object):
             """
             proposed_actions = self.AN.forward(initial_market_encoding)
             expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
+            expected_value.backward()
 
             # get expected and actual critic values
             expected = self.CN.forward(initial_market_encoding, queried_amount)

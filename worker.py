@@ -13,7 +13,8 @@ import redis
 
 """
 TODO
-specify which cpu core to use
+-specify which cpu core to use
+-fix model usage to fit the proper usage
 """
 
 

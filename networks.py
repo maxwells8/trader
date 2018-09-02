@@ -35,14 +35,13 @@ class MarketEncoder(nn.Module):
 
         x = None
         if reset_lstm:
-            self.hidden = self.init_hidden(input_market_values[0].size()[1])
+            self.hidden = self.init_hidden(input_market_values.size()[1])
 
-        for value in input_market_values:
-            x = F.leaky_relu(self.fc1(value.view(1, input_market_values[0].size()[1], self.input_dim)))
-            # x = F.leaky_relu(self.fc2(x)) + x
-            x, self.hidden = self.lstm(x, self.hidden)
-
-        return F.leaky_relu(x)
+        x = F.leaky_relu(self.fc1(input_market_values))
+        # x = F.leaky_relu(self.fc2(x)) + x
+        x, self.hidden = self.lstm(x, self.hidden)
+        x = F.leaky_relu(x[-1])
+        return x
 
 
 class Actor(nn.Module):
@@ -60,7 +59,7 @@ class Actor(nn.Module):
         self.fc3 = nn.Linear(self.d_model, 2)
 
     def forward(self, market_encoding):
-        x = F.leaky_relu(self.fc1(market_encoding.view(1, -1)))
+        x = F.leaky_relu(self.fc1(market_encoding.view(-1, self.d_model)))
         x = F.leaky_relu(self.fc2(x)) + x
         x = F.sigmoid(self.fc3(x))
 
@@ -128,12 +127,12 @@ class OrderNetwork(nn.Module):
         self.value1 = nn.Linear(self.d_model, self.d_model)
         self.value2 = nn.Linear(self.d_model, 1)
 
-    def forward(self, market_encoding, order):
+    def forward(self, market_encoding, orders):
 
-        order_vec = F.leaky_relu(self.order_fc1(order.view(-1, self.d_order)))
+        order_vec = F.leaky_relu(self.order_fc1(orders.view(-1, self.d_order)))
         order_vec = F.leaky_relu(order_vec) + order_vec
 
-        combined = F.leaky_relu(self.combine(torch.cat([market_encoding.view(-1, self.d_model),
+        combined = F.leaky_relu(self.combine(torch.cat([market_encoding.repeat(orders.size()[0], 1).view(-1, self.d_model),
                                                        order_vec.view(-1, self.d_model)], 1)))
 
         advantage = F.leaky_relu(self.advantage1(combined)) + combined
@@ -146,27 +145,27 @@ class OrderNetwork(nn.Module):
 
 
 # """
+d_input = 8
 d_model = 256
-ME = MarketEncoder(8, d_model, 2)
+d_order = 8
+ME = MarketEncoder(d_input, d_model, 2)
 A = Actor(d_model)
 C = Critic(d_model, 2)
-O = OrderNetwork(d_model, 4)
+O = OrderNetwork(d_model, d_order)
 
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(512)]
-orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(64)]
+orders = torch.randn([64, d_order])
 
 # n = 10
 # t0 = time.time()
 # for _ in range(n):
-
-market_encoding = ME.forward(inputs)
+market_encoding = ME.forward(torch.cat(inputs))
 proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
 Q_actions = C.forward(market_encoding, proposed_actions)
+close = O.forward(market_encoding, orders)
 Q_actions[1].backward()
-for f in C.parameters():
-    print(f)
-for order in orders:
-    close = O.forward(market_encoding, order)
+for foo in A.parameters():
+    print(foo.grad.size())
 
 # print((time.time() - t0) / n)
 # """
