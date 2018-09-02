@@ -8,6 +8,7 @@ import time
 from collections import namedtuple
 from networks import *
 from environment import *
+from worker import Experience
 import redis
 
 
@@ -15,14 +16,6 @@ import redis
 Keep a target network. Update it using an exponential moving average.
 Convert experience to cuda tensors.
 """
-
-Experience = namedtuple('Experience',
-                        ('time_states',
-                         'orders',
-                         'queried_amount',
-                         'orders_actions',
-                         'place_action',
-                         'reward'))
 
 
 class Optimizer(object):
@@ -33,16 +26,45 @@ class Optimizer(object):
         self.CN = torch.load('models/critic.pt')
         self.ON = torch.load('models/order.pt')
 
-        self.target_MEN = self.MEN
-        self.AN = self.AN
-        self.CN = self.CN
-        self.ON = self.ON
+        self.MEN_ = torch.load('models/market_encoder.pt')
+        self.AN_ = torch.load('models/actor.pt')
+        self.CN_ = torch.load('models/critic.pt')
+        self.ON_ = torch.load('models/order.pt')
+
 
         self.server = redis.Redis("localhost")
+        self.gamma = self.server.get("gamma")
+        self.tau = self.server.get("tau")
 
         self.experience = []
 
     def run(self):
-        while True:
 
-            market_encoding = self.MEN.forward()
+        while True:
+            # get the inputs to the networks in the right form
+            batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
+            initial_time_states = torch.cat(batch.time_states[:-1], 1)
+            final_time_states = torch.cat(batch.time_states[1:], 1)
+            orders = batch.orders # i'm not sure how the hell i'm gonna handle variable orders for each sample of experience
+            queried_amount = torch.cat(batch.queried_amount)
+            orders_actions = torch.cat(batch.orders_actions)
+            place_action = torch.cat(batch.place_action)
+            reward = torch.cat(batch.reward)
+
+            # calculate the market_encoding
+            initial_market_encoding = self.MEN.forward(initial_time_states)
+            final_market_encoding = self.MEN_.forward(final_time_states)
+
+            # output of actor and critic
+            """
+            i have an inclination that using CN_ instead of CN in the following
+            block of code might help to increase stability. not entirely sure
+            about this, but it shouldn't really hurt anything if not.
+            """
+            proposed_actions = self.AN.forward(initial_market_encoding)
+            expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
+
+            # get expected and actual critic values
+            expected = self.CN.forward(initial_market_encoding, queried_amount)
+            final_critic_values = self.CN_.forward(final_market_encoding, queried_amount)
+            actual = reward + (final_critic_values * self.gamma)

@@ -13,7 +13,7 @@ import redis
 
 """
 TODO
-get cpu core
+specify which cpu core to use
 """
 
 

@@ -25,20 +25,20 @@ class MarketEncoder(nn.Module):
         self.fc1 = nn.Linear(self.input_dim, self.d_model)
         # self.fc2 = nn.Linear(self.d_model, self.d_model)
         self.lstm = nn.LSTM(input_size=self.d_model, hidden_size=self.d_model, num_layers=lstm_layers)
-        self.hidden = self.init_hidden()
+        self.hidden = self.init_hidden(1)
 
-    def init_hidden(self):
-        return (torch.zeros(self.lstm_layers, 1, self.d_model),
-                torch.zeros(self.lstm_layers, 1, self.d_model))
+    def init_hidden(self, batch_size):
+        return (torch.zeros(self.lstm_layers, batch_size, self.d_model),
+                torch.zeros(self.lstm_layers, batch_size, self.d_model))
 
     def forward(self, input_market_values, reset_lstm=True):
 
         x = None
         if reset_lstm:
-            self.hidden = self.init_hidden()
+            self.hidden = self.init_hidden(input_market_values[0].size()[1])
 
         for value in input_market_values:
-            x = F.leaky_relu(self.fc1(value.view(1, 1, self.input_dim)))
+            x = F.leaky_relu(self.fc1(value.view(1, input_market_values[0].size()[1], self.input_dim)))
             # x = F.leaky_relu(self.fc2(x)) + x
             x, self.hidden = self.lstm(x, self.hidden)
 
@@ -74,10 +74,11 @@ class Critic(nn.Module):
     the reward is defined as the ratio between the total balance at t time steps and at open
     """
 
-    def __init__(self, d_model):
+    def __init__(self, d_model, d_action):
         super(Critic, self).__init__()
 
         self.d_model = d_model
+        self.d_action = d_action
 
         self.fc1 = nn.Linear(self.d_model + 2, self.d_model)
 
@@ -89,8 +90,8 @@ class Critic(nn.Module):
 
     def forward(self, market_encoding, action):
 
-        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(1, -1),
-                                             action.view(1, -1)], 1)))
+        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, self.d_model),
+                                             action.view(-1, self.d_action)], 1)))
 
         advantage = F.leaky_relu(self.advantage1(x)) + x
         advantage = self.advantage2(advantage)
@@ -129,11 +130,11 @@ class OrderNetwork(nn.Module):
 
     def forward(self, market_encoding, order):
 
-        order_vec = F.leaky_relu(self.order_fc1(order.view(1, -1)))
+        order_vec = F.leaky_relu(self.order_fc1(order.view(-1, self.d_order)))
         order_vec = F.leaky_relu(order_vec) + order_vec
 
-        combined = F.leaky_relu(self.combine(torch.cat([market_encoding.view(1, -1),
-                                                       order_vec.view(1, -1)], 1)))
+        combined = F.leaky_relu(self.combine(torch.cat([market_encoding.view(-1, self.d_model),
+                                                       order_vec.view(-1, self.d_model)], 1)))
 
         advantage = F.leaky_relu(self.advantage1(combined)) + combined
         advantage = self.advantage2(advantage)
@@ -145,25 +146,29 @@ class OrderNetwork(nn.Module):
 
 
 # """
-ME = MarketEncoder(8, 256, 2)
-A = Actor(256)
-C = Critic(256)
-O = OrderNetwork(256, 4)
+d_model = 256
+ME = MarketEncoder(8, d_model, 2)
+A = Actor(d_model)
+C = Critic(d_model, 2)
+O = OrderNetwork(d_model, 4)
 
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(512)]
 orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(64)]
 
-n = 10
-t0 = time.time()
-for _ in range(n):
+# n = 10
+# t0 = time.time()
+# for _ in range(n):
 
-    market_encoding = ME.forward(inputs)
-    proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
-    Q_actions = C.forward(market_encoding, proposed_actions)
-    for order in orders:
-        close = O.forward(market_encoding, order)
+market_encoding = ME.forward(inputs)
+proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
+Q_actions = C.forward(market_encoding, proposed_actions)
+Q_actions[1].backward()
+for f in C.parameters():
+    print(f)
+for order in orders:
+    close = O.forward(market_encoding, order)
 
-print((time.time() - t0) / n)
+# print((time.time() - t0) / n)
 # """
 """
 ME = MarketEncoder(8, 256, 2)
