@@ -26,8 +26,15 @@ class Optimizer(object):
         self.CN = torch.load('models/critic.pt')
         self.ON = torch.load('models/order.pt')
 
+        self.MEN_ = torch.load('models/market_encoder.pt')
+        self.AN_ = torch.load('models/actor.pt')
+        self.CN_ = torch.load('models/critic.pt')
+        self.ON_ = torch.load('models/order.pt')
+
+
         self.server = redis.Redis("localhost")
         self.gamma = self.server.get("gamma")
+        self.tau = self.server.get("tau")
 
         self.experience = []
 
@@ -46,17 +53,18 @@ class Optimizer(object):
 
             # calculate the market_encoding
             initial_market_encoding = self.MEN.forward(initial_time_states)
-            final_market_encoding = self.MEN.forward(final_time_states)
+            final_market_encoding = self.MEN_.forward(final_time_states)
+
+            # output of actor and critic
+            """
+            i have an inclination that using CN_ instead of CN in the following
+            block of code might help to increase stability. not entirely sure
+            about this, but it shouldn't really hurt anything if not.
+            """
+            proposed_actions = self.AN.forward(initial_market_encoding)
+            expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
 
             # get expected and actual critic values
             expected = self.CN.forward(initial_market_encoding, queried_amount)
-            final_critic_values = self.CN.forward(final_market_encoding, queried_amount)
+            final_critic_values = self.CN_.forward(final_market_encoding, queried_amount)
             actual = reward + (final_critic_values * self.gamma)
-
-            # get the gradients for the actor
-
-            # get the gradients for the critic
-
-            # get the gradients for the order network
-
-            pass

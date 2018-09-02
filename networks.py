@@ -25,7 +25,7 @@ class MarketEncoder(nn.Module):
         self.fc1 = nn.Linear(self.input_dim, self.d_model)
         # self.fc2 = nn.Linear(self.d_model, self.d_model)
         self.lstm = nn.LSTM(input_size=self.d_model, hidden_size=self.d_model, num_layers=lstm_layers)
-        self.hidden = self.init_hidden()
+        self.hidden = self.init_hidden(1)
 
     def init_hidden(self, batch_size):
         return (torch.zeros(self.lstm_layers, batch_size, self.d_model),
@@ -38,7 +38,7 @@ class MarketEncoder(nn.Module):
             self.hidden = self.init_hidden(input_market_values[0].size()[1])
 
         for value in input_market_values:
-            x = F.leaky_relu(self.fc1(value.view(self.lstm_layers, input_market_values[0].size()[1], self.input_dim)))
+            x = F.leaky_relu(self.fc1(value.view(1, input_market_values[0].size()[1], self.input_dim)))
             # x = F.leaky_relu(self.fc2(x)) + x
             x, self.hidden = self.lstm(x, self.hidden)
 
@@ -146,25 +146,29 @@ class OrderNetwork(nn.Module):
 
 
 # """
-ME = MarketEncoder(8, 256, 2)
-A = Actor(256)
-C = Critic(256)
-O = OrderNetwork(256, 4)
+d_model = 256
+ME = MarketEncoder(8, d_model, 2)
+A = Actor(d_model)
+C = Critic(d_model, 2)
+O = OrderNetwork(d_model, 4)
 
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(512)]
 orders = [torch.from_numpy(np.random.randn(4)).float() for _ in range(64)]
 
-n = 10
-t0 = time.time()
-for _ in range(n):
+# n = 10
+# t0 = time.time()
+# for _ in range(n):
 
-    market_encoding = ME.forward(inputs)
-    proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
-    Q_actions = C.forward(market_encoding, proposed_actions)
-    for order in orders:
-        close = O.forward(market_encoding, order)
+market_encoding = ME.forward(inputs)
+proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
+Q_actions = C.forward(market_encoding, proposed_actions)
+Q_actions[1].backward()
+for f in C.parameters():
+    print(f)
+for order in orders:
+    close = O.forward(market_encoding, order)
 
-print((time.time() - t0) / n)
+# print((time.time() - t0) / n)
 # """
 """
 ME = MarketEncoder(8, 256, 2)
