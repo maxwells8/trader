@@ -39,6 +39,12 @@ class Optimizer(object):
         self.experience = []
 
     def run(self):
+        """
+        HIGH LEVEL OVERVIEW
+
+        - get the batch of experience
+        - calculate the gradients for the loss functions
+        """
 
         while True:
             # get the inputs to the networks in the right form
@@ -63,7 +69,8 @@ class Optimizer(object):
             """
             proposed_actions = self.AN.forward(initial_market_encoding)
             expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
-            expected_value.backward()
+            # backpropagate the gradient for AN
+            negative_expected_value.backward()
 
             # get expected and actual critic values
             expected = self.CN.forward(initial_market_encoding, queried_amount)

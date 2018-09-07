@@ -127,13 +127,18 @@ class OrderNetwork(nn.Module):
         self.value1 = nn.Linear(self.d_model, self.d_model)
         self.value2 = nn.Linear(self.d_model, 1)
 
-    def forward(self, market_encoding, orders):
+    def forward(self, market_encodings, orders):
 
         order_vec = F.leaky_relu(self.order_fc1(orders.view(-1, self.d_order)))
         order_vec = F.leaky_relu(order_vec) + order_vec
 
-        combined = F.leaky_relu(self.combine(torch.cat([market_encoding.repeat(orders.size()[0], 1).view(-1, self.d_model),
-                                                       order_vec.view(-1, self.d_model)], 1)))
+        combined = F.leaky_relu(
+            self.combine(
+                torch.cat([market_encodings.view(-1, self.d_model),
+                           order_vec.view(-1, self.d_model
+                )], 1)
+            )
+        )
 
         advantage = F.leaky_relu(self.advantage1(combined)) + combined
         advantage = self.advantage2(advantage)
@@ -162,7 +167,8 @@ orders = torch.randn([64, d_order])
 market_encoding = ME.forward(torch.cat(inputs))
 proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
 Q_actions = C.forward(market_encoding, proposed_actions)
-close = O.forward(market_encoding, orders)
+orders_actions = O.forward(market_encoding.repeat(orders.size()[0], 1), orders)
+print(orders_actions)
 Q_actions[1].backward()
 for foo in A.parameters():
     print(foo.grad.size())
