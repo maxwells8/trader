@@ -45,7 +45,7 @@ class Optimizer(object):
             batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
             initial_time_states = torch.cat(batch.time_states[:-1], 1)
             final_time_states = torch.cat(batch.time_states[1:], 1)
-            orders = batch.orders # i'm not sure how the hell i'm gonna handle variable orders for each sample of experience
+            orders = [orders[i] for orders in batch.orders for i in range(len(orders))]
             queried_amount = torch.cat(batch.queried_amount)
             orders_actions = torch.cat(batch.orders_actions)
             place_action = torch.cat(batch.place_action)
@@ -69,3 +69,11 @@ class Optimizer(object):
             expected = self.CN.forward(initial_market_encoding, queried_amount)
             final_critic_values = self.CN_.forward(final_market_encoding, queried_amount)
             actual = reward + (final_critic_values * self.gamma)
+
+            # output of orders network
+            order_market_encodings = []
+            for i, market_encoding in enumerate(initial_market_encoding):
+                order_market_encodings.append((market_encoding, len(batch.orders[i])))
+
+            order_actions_ = self.ON(order_market_encodings, orders)
+            
