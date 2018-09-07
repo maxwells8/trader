@@ -96,6 +96,8 @@ class Worker(object):
             get this nasty for loop out of here
             """
             for order_i in range(len(open_orders)):
+                # THIS WILL NO LONGER WORK -- CHECK THE ORDER NETWORK FOR
+                # THE UPDATED VERSION
                 advantage = self.order.forward(market_encoding, torch.from_numpy(open_orders[order_i].as_ndarray()))[0]
 
                 action = int(advantage.max(1)[1])
