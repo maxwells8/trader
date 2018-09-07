@@ -69,13 +69,18 @@ class Optimizer(object):
             """
             proposed_actions = self.AN.forward(initial_market_encoding)
             expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
+
             # backpropagate the gradient for AN
-            negative_expected_value.backward()
+            expected_value.backward()
 
             # get expected and actual critic values
             expected = self.CN.forward(initial_market_encoding, queried_amount)
             final_critic_values = self.CN_.forward(final_market_encoding, queried_amount)
             actual = reward + (final_critic_values * self.gamma)
+
+            # calculate and backpropagate the mse loss
+            critic_loss = F.l1_loss(expected, actual)
+            critic_loss.backward()
 
             # output of orders network
             order_market_encodings = []
@@ -83,4 +88,3 @@ class Optimizer(object):
                 order_market_encodings.append((market_encoding, len(batch.orders[i])))
 
             order_actions_ = self.ON(order_market_encodings, orders)
-            
