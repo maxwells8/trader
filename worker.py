@@ -15,6 +15,7 @@ import redis
 TODO
 -specify which cpu core to use
 -fix model usage to fit the proper usage
+-make sure redis works with everything (not just in worker.py)
 """
 
 
@@ -45,6 +46,7 @@ class Worker(object):
         replay_orders_actions = []
         replay_place_action = None
         replay_reward = 0
+        replay_orders_rewards = []
         while True:
             state = self.environment.get_state()
             if not state:
@@ -52,17 +54,19 @@ class Worker(object):
 
             replay_time_states = time_states
 
-            time_states, open_orders, balance, value, reward = state
+            time_states, open_orders, balance, value, reward, orders_rewards = state
 
             replay_time_states.append(time_states[-1])
             replay_reward = reward
+            replay_orders_rewards = orders_rewards
             # add experience
             self.replay.add_experience(Experience(replay_time_states,
                                                   replay_orders,
                                                   replay_queried,
                                                   replay_orders_actions,
                                                   replay_place_action,
-                                                  replay_reward))
+                                                  replay_reward,
+                                                  replay_orders_rewards))
 
             market_encoding = self.market_encoder.forward(time_states)
 
@@ -112,7 +116,7 @@ class Worker(object):
 
             self.environment.step(placed_order, closed_orders)
 
-            if int(self.server.get('update').decode("utf-8")):
+            if int(self.server.get('worker_update').decode("utf-8")):
                 self.replay.push(self.server)
                 self.market_encoder = torch.load('models/market_encoder.pt')
                 self.actor = torch.load('models/actor.pt')
@@ -126,7 +130,8 @@ Experience = namedtuple('Experience',
                          'queried_amount',
                          'orders_actions',
                          'place_action',
-                         'reward'))
+                         'reward'
+                         'orders_rewards'))
 
 
 class ReplayMemory(object):

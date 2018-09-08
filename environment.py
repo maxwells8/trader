@@ -5,7 +5,6 @@ import time
 
 """
 TODO:
-- change the reward from the current portfolio value to the difference in values between time states
 - return the reward for each order (reward for the order is the change in the order's value)
 """
 
@@ -41,7 +40,7 @@ class Env(object):
         if self.cur_i == self.data.shape[0]:
             return False
 
-        return self.time_states, self.orders, self.balance, self.calculate_value(), self.reward()
+        return self.time_states, self.orders, self.balance, self.calculate_value(), self.reward(), self.orders_rewards()
 
     def step(self, placed_order, closed_orders_indices):
         if placed_order[0] == 0:
@@ -104,6 +103,14 @@ class Env(object):
     def reward(self):
         self.calculate_value()
         return self.value - self.prev_value
+
+    def orders_rewards(self):
+        rewards = []
+        for order in self.orders:
+            rewards.append(self.time_states[-1].close - order.open_price)
+
+        return rewards
+
 
     @staticmethod
     def _get_rand_spread():
