@@ -3,6 +3,11 @@ import pandas as pd
 import numpy as np
 import time
 
+"""
+TODO:
+- change the reward from the current portfolio value to the difference in values between time states
+- return the reward for each order (reward for the order is the change in the order's value)
+"""
 
 class Env(object):
 
