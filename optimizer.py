@@ -62,11 +62,6 @@ class Optimizer(object):
             final_market_encoding = self.MEN_.forward(final_time_states)
 
             # output of actor and critic
-            """
-            i have an inclination that using CN_ instead of CN in the following
-            block of code might help to increase stability. not entirely sure
-            about this, but it shouldn't really hurt anything if not.
-            """
             proposed_actions = self.AN.forward(initial_market_encoding)
             expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
 
@@ -74,12 +69,13 @@ class Optimizer(object):
             expected_value.backward()
 
             # get expected and actual critic values
-            expected = self.CN.forward(initial_market_encoding, queried_amount)
-            final_critic_values = self.CN_.forward(final_market_encoding, queried_amount)
-            actual = reward + (final_critic_values * self.gamma)
+            expected_advantage, expected_value = self.CN.forward(initial_market_encoding, queried_amount)
+            final_advantage, final_value = self.CN_.forward(final_market_encoding, queried_amount)
+            actual_Q = reward + ((final_value + final_advantage).max(1)[0].detach() * self.gamma)
 
-            # calculate and backpropagate the mse loss
-            critic_loss = F.l1_loss(expected, actual)
+            # calculate and backpropagate the mse loss critic
+            expected_Q = expected_value + expected_advantage.gather(1, torch.Tensor(place_action).long().view(-1, 1))
+            critic_loss = F.smooth_l1_loss(expected_Q, actual_Q)
             critic_loss.backward()
 
             # output of orders network

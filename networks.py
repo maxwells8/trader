@@ -69,8 +69,6 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     """
     takes a market encoding and a proposed action, and outputs the advantage and value of buying, selling, and neither
-
-    the reward is defined as the ratio between the total balance at t time steps and at open
     """
 
     def __init__(self, d_model, d_action):
@@ -104,8 +102,6 @@ class Critic(nn.Module):
 class OrderNetwork(nn.Module):
     """
     takes a market encoding and an open order, and outputs the advantage and value of keeping and closing the order
-
-    the reward is defined as the ratio between the closing value and the opening value
 
     the order must give the open time information
     """
