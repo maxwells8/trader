@@ -4,6 +4,11 @@ import numpy as np
 import time
 
 
+"""
+add functionality to get some random price within the high and low of the
+current price. this can be used to continually check whether a trade is worth
+it, not just at the very beginning of the tick.
+"""
 class Env(object):
 
     def __init__(self, source, spread_func=lambda _:Env._get_rand_spread(), time_window=512):

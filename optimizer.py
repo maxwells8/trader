@@ -15,8 +15,6 @@ import redis
 """
 Convert experience to cuda tensors.
 """
-
-
 class Optimizer(object):
 
     def __init__(self, optimizer):
