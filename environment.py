@@ -3,10 +3,6 @@ import pandas as pd
 import numpy as np
 import time
 
-"""
-TODO:
-- return the reward for each order (reward for the order is the change in the order's value)
-"""
 
 class Env(object):
 

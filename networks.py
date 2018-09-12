@@ -123,7 +123,7 @@ class OrderNetwork(nn.Module):
         self.value1 = nn.Linear(self.d_model, self.d_model)
         self.value2 = nn.Linear(self.d_model, 1)
 
-    def forward(self, market_encodings, orders):
+    def forward(self, market_encoding_tuples, orders):
         """
         market_encodings is a list of tuples: [(market_encoding0, n0), ..., (market_encodingk, nk)]
         """
@@ -131,7 +131,7 @@ class OrderNetwork(nn.Module):
         order_vec = F.leaky_relu(order_vec) + order_vec
 
         market_encoding = torch.Tensor([])
-        for METuple in market_encodings:
+        for METuple in market_encoding_tuples:
             next_ME = METuple[0].view(-1, self.d_model).repeat(METuple[1], 1)
             market_encoding = torch.cat([market_encoding, next_ME], 0)
         combined = F.leaky_relu(self.combine(torch.cat([market_encoding,
@@ -167,7 +167,7 @@ market_encoding = ME.forward(torch.cat(inputs))
 proposed_actions = A.forward(market_encoding) + (torch.randn(1, 2) * 0.05)
 Q_actions = C.forward(market_encoding, proposed_actions)
 close = O.forward([(market_encoding, int(len(orders)))], orders)
-print(close)
+print(close[0].max(1)[1])
 Q_actions[1].backward()
 for foo in A.parameters():
     print(foo.grad.size())

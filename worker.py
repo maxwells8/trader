@@ -14,7 +14,6 @@ import redis
 """
 TODO
 -specify which cpu core to use
--fix model usage to fit the proper usage
 -make sure redis works with everything (not just in worker.py)
 """
 
@@ -96,23 +95,15 @@ class Worker(object):
             replay_orders_actions = []
             closed_orders = []
             # go through each order
-            """
-            get this nasty for loop out of here
-            """
-            for order_i in range(len(open_orders)):
-                # THIS WILL NO LONGER WORK -- CHECK THE ORDER NETWORK FOR
-                # THE UPDATED VERSION
-                advantage = self.order.forward(market_encoding, torch.from_numpy(open_orders[order_i].as_ndarray()))[0]
-
-                action = int(advantage.max(1)[1])
+            advantage, _ = self.order.forward([(market_encoding, int(len(open_orders)))], open_orders)
+            actions = advantage.max(1)[1]
+            for i, action in enumerate(actions):
                 if np.random.rand() < self.close_epsilon:
                     action = np.random.randint(0, 2)
 
-                if action == 0:
-                    replay_orders_actions.append(action)
-                elif action == 1:
-                    closed_orders.append(order_i)
-                    replay_orders_actions.append(action)
+                if action == 1:
+                    closed_orders.append(open_orders[i])
+                replay_orders_actions.append(action)
 
             self.environment.step(placed_order, closed_orders)
 
