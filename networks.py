@@ -9,7 +9,9 @@ torch.manual_seed(0)
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-
+"""
+Think FIFO
+"""
 class MarketEncoder(nn.Module):
     """
     goes through each market time step with an lstm, and outputs a 'market encoding'
