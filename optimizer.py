@@ -11,6 +11,8 @@ from environment import *
 from worker import Experience
 import redis
 
+torch.manual_seed(0)
+torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 """
 Convert experience to cuda tensors.
@@ -19,23 +21,23 @@ class Optimizer(object):
 
     def __init__(self, optimizer):
         # networks
-        self.MEN = torch.load('models/market_encoder.pt')
-        self.AN = torch.load('models/actor.pt')
-        self.CN = torch.load('models/critic.pt')
-        self.ON = torch.load('models/order.pt')
+        self.MEN = torch.load('models/market_encoder.pt').cuda()
+        self.AN = torch.load('models/actor.pt').cuda()
+        self.CN = torch.load('models/critic.pt').cuda()
+        self.ON = torch.load('models/order.pt').cuda()
 
-        # target networks (don't need a target actor network)
-        self.MEN_ = torch.load('models/market_encoder.pt')
-        self.CN_ = torch.load('models/critic.pt')
-        self.ON_ = torch.load('models/order.pt')
+        # target networks. don't need a target actor network
+        self.MEN_ = torch.load('models/market_encoder.pt').cuda()
+        self.CN_ = torch.load('models/critic.pt').cuda()
+        self.ON_ = torch.load('models/order.pt').cuda()
 
         self.server = redis.Redis("localhost")
-        self.gamma = self.server.get("gamma")
-        self.tau = self.server.get("tau")
-        self.alpha = self.server.get("alpha")
-        self.betas = self.server.get("betas")
-        self.epsilon = self.server.get("epsilon")
-        self.weight_penalty = self.server.get("weight_penalty")
+        self.gamma = float(self.server.get("optimizer_gamma").decode("utf-8"))
+        self.tau = float(self.server.get("optimizer_tau").decode("utf-8"))
+        self.alpha = float(self.server.get("optimizer_alpha").decode("utf-8"))
+        self.betas = float(self.server.get("optimizer_betas").decode("utf-8"))
+        self.epsilon = float(self.server.get("optimizer_epsilon").decode("utf-8"))
+        self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
 
         self.experience = []
         self.optimizer = optim.Adam(self.MEN.parameters() +
@@ -56,14 +58,14 @@ class Optimizer(object):
 
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
-            initial_time_states = torch.cat(batch.time_states[:-1], 1)
-            final_time_states = torch.cat(batch.time_states[1:], 1)
+            initial_time_states = torch.cat(batch.time_states[:-1], 1).cuda()
+            final_time_states = torch.cat(batch.time_states[1:], 1).cuda()
             orders = [orders[i] for orders in batch.orders for i in range(len(orders))]
-            queried_amount = torch.cat(batch.queried_amount)
-            orders_actions = torch.cat(batch.orders_actions)
-            place_action = torch.cat(batch.place_action)
-            reward = torch.cat(batch.reward)
-            orders_rewards = torch.cat(batch.orders_rewards)
+            queried_amount = torch.cat(batch.queried_amount).cuda()
+            orders_actions = torch.cat(batch.orders_actions).cuda()
+            place_action = torch.cat(batch.place_action).cuda()
+            reward = torch.cat(batch.reward).cuda()
+            orders_rewards = torch.cat(batch.orders_rewards).cuda()
 
             # calculate the market_encoding
             initial_market_encoding = self.MEN.forward(initial_time_states)

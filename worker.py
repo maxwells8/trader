@@ -10,10 +10,13 @@ from networks import *
 from environment import *
 import redis
 
+np.random.seed(0)
+torch.manual_seed(0)
+torch.set_default_tensor_type(torch.FloatTensor)
 
 """
 TODO
--specify which cpu core to use
+-specify cpu use
 -make sure redis works with everything (not just in worker.py)
 """
 
@@ -23,16 +26,16 @@ class Worker(object):
     def __init__(self, source, name, window=512):
 
         self.environment = Env(source, window)
-        self.market_encoder = torch.load('models/market_encoder.pt')
-        self.actor = torch.load('models/actor.pt')
-        self.critic = torch.load('models/critic.pt')
-        self.order = torch.load('models/order.pt')
+        self.market_encoder = torch.load('models/market_encoder.pt').cpu()
+        self.actor = torch.load('models/actor.pt').cpu()
+        self.critic = torch.load('models/critic.pt').cpu()
+        self.order = torch.load('models/order.pt').cpu()
 
         self.server = redis.Redis("localhost")
-        self.name = name.decode("utf-8")
-        self.place_epsilon = self.server.get("place_epsilon_" + name)
-        self.close_epsilon = self.server.get("close_epsilon_" + name)
-        self.sigma = self.server.get("sigma_" + name)
+        self.name = name
+        self.place_epsilon = float(self.server.get("place_epsilon_" + name).decode("utf-8"))
+        self.close_epsilon = float(self.server.get("close_epsilon_" + name).decode("utf-8"))
+        self.sigma = float(self.server.get("sigma_" + name).decode("utf-8"))
 
         self.replay = ReplayMemory()
 
@@ -109,10 +112,10 @@ class Worker(object):
 
             if int(self.server.get('worker_update').decode("utf-8")):
                 self.replay.push(self.server)
-                self.market_encoder = torch.load('models/market_encoder.pt')
-                self.actor = torch.load('models/actor.pt')
-                self.critic = torch.load('models/critic.pt')
-                self.order = torch.load('models/order.pt')
+                self.market_encoder = torch.load('models/market_encoder.pt').cpu()
+                self.actor = torch.load('models/actor.pt').cpu()
+                self.critic = torch.load('models/critic.pt').cpu()
+                self.order = torch.load('models/order.pt').cpu()
 
 
 Experience = namedtuple('Experience',

@@ -7,7 +7,7 @@ import time
 
 torch.manual_seed(0)
 # torch.cuda.manual_seed(0)
-# torch.set_default_tensor_type(torch.cuda.FloatTensor)
+torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 """
 Think FIFO
@@ -132,7 +132,7 @@ class OrderNetwork(nn.Module):
         order_vec = F.leaky_relu(self.order_fc1(orders.view(-1, self.d_order)))
         order_vec = F.leaky_relu(order_vec) + order_vec
 
-        market_encoding = torch.Tensor([])
+        market_encoding = torch.Tensor([], device=str(order_vec.device))
         for METuple in market_encoding_tuples:
             next_ME = METuple[0].view(-1, self.d_model).repeat(METuple[1], 1)
             market_encoding = torch.cat([market_encoding, next_ME], 0)
