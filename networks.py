@@ -7,10 +7,27 @@ import time
 
 torch.manual_seed(0)
 # torch.cuda.manual_seed(0)
-torch.set_default_tensor_type(torch.cuda.FloatTensor)
+# torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 """
-Think FIFO
+TODO
+- think FIFO
+- change the inputs of the market encoder to be ticks of
+(open high low close (volume?))
+
+PROBLEM:
+the current architecture will constantly signal to place a trade if the market
+looks favorable for that trade, thus just placing the entirety of the balance
+into the trade. how shoud we avoid this?
+
+i think the best solution would be to just forget the order network,
+and have the critic output the expected return of (closing all orders,
+adding another order in the same direction (with amount given by an actor),
+and just staying put).
+
+if we can close only a portion of orders, we could take advantage of that,
+but i'm not sure we can. ie, if we have already bought 5.5 EUR/USD, being
+able to sell 1.2 EUR/USD without closing the entire trade would be advantageous.
 """
 class MarketEncoder(nn.Module):
     """
