@@ -17,24 +17,24 @@ class MarketEncoder(nn.Module):
     goes through each market time step with an lstm, and outputs a 'market encoding'
     """
 
-    def __init__(self, input_dim, d_model, lstm_layers):
+    def __init__(self, input_dim, d_model, lstm_layers, device):
         super(MarketEncoder, self).__init__()
 
         self.d_model = d_model
         self.input_dim = input_dim
         self.lstm_layers = lstm_layers
+        self.device = device
 
-        self.fc1 = nn.Linear(self.input_dim, self.d_model)
+        self.fc1 = nn.Linear(self.input_dim, self.d_model, device=self.device)
         # self.fc2 = nn.Linear(self.d_model, self.d_model)
-        self.lstm = nn.LSTM(input_size=self.d_model, hidden_size=self.d_model, num_layers=lstm_layers)
+        self.lstm = nn.LSTM(input_size=self.d_model, hidden_size=self.d_model, num_layers=lstm_layers, device=self.device)
         self.hidden = self.init_hidden(1)
 
     def init_hidden(self, batch_size):
-        return (torch.zeros(self.lstm_layers, batch_size, self.d_model),
-                torch.zeros(self.lstm_layers, batch_size, self.d_model))
+        return (torch.zeros(self.lstm_layers, batch_size, self.d_model, device=self.device),
+                torch.zeros(self.lstm_layers, batch_size, self.d_model, device=self.device))
 
     def forward(self, input_market_values, reset_lstm=True):
-
         x = None
         if reset_lstm:
             self.hidden = self.init_hidden(input_market_values.size()[1])
@@ -150,7 +150,7 @@ class OrderNetwork(nn.Module):
         return advantage, value
 
 
-# """
+"""
 d_input = 8
 d_model = 256
 d_order = 8
@@ -173,9 +173,12 @@ print(close[0].max(1)[1])
 Q_actions[1].backward()
 for foo in A.parameters():
     print(foo.grad.size())
-
+torch.save(ME, "models/market_encoder.pt")
+torch.save(A, "models/actor.pt")
+torch.save(C, "models/critic.pt")
+torch.save(O, "models/order.pt")
 # print((time.time() - t0) / n)
-# """
+"""
 """
 ME = MarketEncoder(8, 256, 2)
 inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]

@@ -11,7 +11,7 @@ it, not just at the very beginning of the tick.
 """
 class Env(object):
 
-    def __init__(self, source, spread_func=lambda _:Env._get_rand_spread(), time_window=512):
+    def __init__(self, source, spread_func=(lambda _:np.random.gamma(3, 2 / 10000))(None), time_window=512):
         self.data = pd.DataFrame(pd.read_csv(source))
 
         self.time_window = time_window
@@ -30,7 +30,7 @@ class Env(object):
                                      low=self.data['low'][self.cur_i],
                                      close=self.data['close'][self.cur_i],
                                      time=self.data['time'][self.cur_i],
-                                     spread=self.spread_func(None),
+                                     spread=self.spread_func,
                                      balance=self.balance,
                                      value=self.value)
 
@@ -111,11 +111,6 @@ class Env(object):
             rewards.append(self.time_states[-1].close - order.open_price)
 
         return rewards
-
-
-    @staticmethod
-    def _get_rand_spread():
-        return np.random.gamma(3, 2 / 10000)
 
 
 class Order(object):
