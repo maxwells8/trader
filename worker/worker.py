@@ -18,6 +18,7 @@ torch.set_default_tensor_type(torch.FloatTensor)
 """
 TODO
 - change all the devices to cpu
+- update to the new network architecture
 """
 class Worker(object):
 

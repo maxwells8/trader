@@ -15,7 +15,10 @@ import pickle
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-
+"""
+TODO: 
+- update to the new network architecture
+"""
 class Optimizer(object):
 
     def __init__(self, models_loc):
