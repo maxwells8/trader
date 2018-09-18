@@ -25,14 +25,12 @@ class Optimizer(object):
         self.models_loc = models_loc
         # networks
         self.MEN = torch.load(self.models_loc + '/market_encoder.pt').cuda()
-        self.AN = torch.load(self.models_loc + '/actor.pt').cuda()
-        self.CN = torch.load(self.models_loc + '/critic.pt').cuda()
-        self.ON = torch.load(self.models_loc + '/order.pt').cuda()
+        self.PN = torch.load(self.models_loc + '/proposer.pt').cuda()
+        self.ACN = torch.load(self.models_loc + '/actor_critic.pt').cuda()
 
-        # target networks. don't need a target actor network
+        # target networks
         self.MEN_ = torch.load(self.models_loc + '/market_encoder.pt').cuda()
-        self.CN_ = torch.load(self.models_loc + '/critic.pt').cuda()
-        self.ON_ = torch.load(self.models_loc + '/order.pt').cuda()
+        self.ACN_ = torch.load(self.models_loc + '/actor_critic.pt').cuda()
 
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("optimizer_gamma").decode("utf-8"))
@@ -44,9 +42,8 @@ class Optimizer(object):
 
         self.experience = []
         self.optimizer = optim.Adam(self.MEN.parameters() +
-                                    self.AN.parameters() +
-                                    self.CN.parameters() +
-                                    self.ON.parameters(),
+                                    self.PN.parameters() +
+                                    self.ACN.parameters(),
                                     lr=self.alpha,
                                     betas=self.betas,
                                     eps=self.epsilon,
@@ -61,59 +58,33 @@ class Optimizer(object):
 
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
-            initial_time_states = torch.cat(batch.time_states[:-1], 1).cuda()
-            final_time_states = torch.cat(batch.time_states[1:], 1).cuda()
-            orders = [orders[i] for orders in batch.orders for i in range(len(orders))]
-            queried_amount = torch.cat(batch.queried_amount).cuda()
-            orders_actions = torch.cat(batch.orders_actions).cuda()
-            place_action = torch.cat(batch.place_action).cuda()
-            reward = torch.cat(batch.reward).cuda()
-            orders_rewards = torch.cat(batch.orders_rewards).cuda()
+            initial_time_states = torch.cat(batch.initial_time_states).cuda()
+            initial_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
+            final_time_states = torch.cat(batch.final_time_states).cuda()
+            final_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
+            proposed = torch.cat(batch.proposed).cuda()
+            place_action = torch.Tensor(batch.place_action, device='cuda')
+            reward = torch.cat(batch.reward, device='cuda')
 
             # calculate the market_encoding
-            initial_market_encoding = self.MEN.forward(initial_time_states)
-            final_market_encoding = self.MEN_.forward(final_time_states)
+            initial_market_encoding = self.MEN.forward(initial_time_states, inital_percent_in, 'cuda')
+            final_market_encoding = self.MEN_.forward(final_time_states, final_percent_in, 'cuda')
 
-            # output of actor and critic
-            proposed_actions = self.AN.forward(initial_market_encoding)
-            expected_value = self.CN_.forward(initial_market_encoding, proposed_actions)[1]
+            # proposed loss
+            proposed_actions = self.PN.forward(initial_market_encoding)
+            _, target_value = self.ACN_.forward(initial_market_encoding, proposed_actions)[1]
+            target_value.backward()
 
-            # backpropagate the gradient for AN
-            expected_value.backward()
+            # critic loss
+            expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
+            next_step_policy, next_step_value = self.ACN_.forward(final_market_encoding, proposed)
+            target_value = reward + (next_step_value * self.gamma)
 
-            # get expected and actual critic values
-            expected_advantage, expected_value = self.CN.forward(initial_market_encoding, queried_amount)
-            final_advantage, final_value = self.CN_.forward(final_market_encoding, queried_amount)
-            actual_Q = reward + ((final_value + final_advantage).max(1)[0].detach() * self.gamma)
-
-            # calculate and backpropagate the critic's loss
-            expected_Q = expected_value + expected_advantage.gather(1, torch.Tensor(place_action).long().view(-1, 1))
-            critic_loss = F.smooth_l1_loss(expected_Q, actual_Q)
+            critic_loss = F.smooth_l1_loss(expected_value, target_value)
             critic_loss.backward()
 
-            # initial output of orders network
-            order_market_encodings = []
-            for i, market_encoding in enumerate(initial_market_encoding):
-                order_market_encodings.append((market_encoding, len(batch.orders[i])))
-            expected_orders_advantage, expected_orders_value = self.ON(order_market_encodings, orders)
-
-            # final output of orders (target) network
-            order_market_encodings_ = []
-            for i, market_encoding in enumerate(final_market_encoding):
-                order_market_encodings_.append((market_encoding), len(batch.orders[i]))
-            final_orders_advantage, final_orders_value = self.ON_(order_market_encodings_, orders)
-
-            # set the order targets using the bellman equation
-            orders_targets = torch.zeros(len(orders))
-            orders_targets = orders_rewards + ((final_orders_value + final_orders_advantage).max(1)[0].detach() * self.gamma)
-
-            # if the orders close, then this is equivalent to the terminal state for the order
-            orders_closed_mask = torch.cat([a == 1 for a in orders_actions])
-            orders_targets[orders_closed_mask] = orders_rewards[orders_closed_mask]
-
-            # calculate and backpropogate the order's loss
-            orders_loss = F.smooth_l1_loss(expected_orders_value + expected_orders_advantage, orders_targets)
-            orders_loss.backward()
+            # policy loss
+            torch.log(expected_policy.gather(1, place_action.view(-1, 1))) * (target_value - expected_value)
 
             # take a step
             self.optimizer.step()
@@ -122,15 +93,11 @@ class Optimizer(object):
             for i, param in enumerate(self.MEN_.parameters()):
                 param = (self.tau * self.MEN.parameters()[i]) + ((1 - self.tau) * param)
 
-            for i, param in enumerate(self.CN_.parameters()):
-                param = (self.tau * self.CN.parameters()[i]) + ((1 - self.tau) * param)
-
-            for i, param in enumerate(self.ON_.parameters()):
-                param = (self.tau * self.ON.parameters()[i]) + ((1 - self.tau) * param)
+            for i, param in enumerate(self.ACN_.parameters()):
+                param = (self.tau * self.ACN.parameters()[i]) + ((1 - self.tau) * param)
 
             if int(self.server.get("optimizer_update").decode("utf-8")):
                 self.experience = pickle.loads(self.server.get("experience"))
                 self.MEN.save(self.models_loc + "/market_encoder.pt")
-                self.AN.save(self.models_loc + "/actor.pt")
-                self.CN.save(self.models_loc + "/critic.pt")
-                self.ON.save(self.models_loc + "/order.pt")
+                self.PN.save(self.models_loc + "/proposer.pt")
+                self.ACN.save(self.models_loc + "/actor_critic.pt")

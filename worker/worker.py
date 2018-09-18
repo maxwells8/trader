@@ -39,6 +39,7 @@ class Worker(object):
         value = self.environment.value
 
         replay_time_states = []
+        replay_percent_in = 0
         replay_proposed = None
         replay_place_action = None
         replay_reward = 0
@@ -56,9 +57,11 @@ class Worker(object):
             (time_states, percent_in), reward = state
 
             replay_time_states.append(time_states[-1])
+            replay_percent_in = percent_in
             replay_reward = reward
             # add experience
             self.experience.append(Experience(replay_time_states,
+                                              replay_percent_in
                                               replay_proposed,
                                               replay_place_action,
                                               replay_reward))
@@ -81,7 +84,7 @@ class Worker(object):
             else:
                 placed_order = [2]
 
-            replay_place_action = placed_order
+            replay_place_action = placed_order[0]
 
             self.environment.step(placed_order)
 
@@ -96,6 +99,7 @@ class Worker(object):
 
 Experience = namedtuple('Experience',
                         ('time_states',
-                         'queried_amount',
+                         'percent_in',
+                         'proposed',
                          'place_action',
                          'reward',))

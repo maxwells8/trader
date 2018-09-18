@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 torch.manual_seed(0)
-D_BAR = 4
+D_BAR = 5
 D_MODEL = 256
 N_LSTM_LAYERS = 2
 # torch.cuda.manual_seed(0)
