@@ -26,29 +26,22 @@ class Worker(object):
 
         self.environment = Env(source, window)
         self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
-        self.market_encoder.device = 'cpu'
-        self.actor = torch.load(models_loc + '/actor.pt').cpu()
-        self.critic = torch.load(models_loc + '/critic.pt').cpu()
-        self.order = torch.load(models_loc + '/order.pt').cpu()
+        self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
+        self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
 
         self.server = redis.Redis("localhost")
         self.name = name
-        self.place_epsilon = float(self.server.get("place_epsilon_" + name).decode("utf-8"))
-        self.close_epsilon = float(self.server.get("close_epsilon_" + name).decode("utf-8"))
         self.sigma = float(self.server.get("sigma_" + name).decode("utf-8"))
 
-        self.replay = ReplayMemory()
+        self.experience = []
 
     def run(self):
         value = self.environment.value
 
         replay_time_states = []
-        replay_orders = []
-        replay_queried = None
-        replay_orders_actions = []
+        replay_proposed = None
         replay_place_action = None
         replay_reward = 0
-        replay_orders_rewards = []
 
         time_states = []
         i = 0
@@ -60,34 +53,26 @@ class Worker(object):
 
             replay_time_states = time_states
 
-            time_states, open_orders, balance, value, reward, orders_rewards = state
+            (time_states, percent_in), reward = state
 
             replay_time_states.append(time_states[-1])
             replay_reward = reward
-            replay_orders_rewards = orders_rewards
             # add experience
-            self.replay.add_experience(Experience(replay_time_states,
-                                                  replay_orders,
-                                                  replay_queried,
-                                                  replay_orders_actions,
-                                                  replay_place_action,
-                                                  replay_reward,
-                                                  replay_orders_rewards))
+            self.experience.append(Experience(replay_time_states,
+                                              replay_proposed,
+                                              replay_place_action,
+                                              replay_reward))
 
-            market_encoding = self.market_encoder.forward(torch.cat(time_states).cpu())
+            market_encoding = self.market_encoder.forward(torch.cat(time_states).cpu(), torch.Tensor([percent_in]).cpu(), 'cpu')
 
-            proposed_actions = self.actor.forward(market_encoding, torch.tensor([balance]).cpu(), torch.tensor([value]).cpu())
+            proposed_actions = self.proposer.forward(market_encoding)
             proposed_actions += torch.randn(1, 2).cpu() * self.sigma
 
-            replay_queried = proposed_actions
+            replay_proposed = proposed_actions
 
-            # buy, sell, or neither
-            Q_actions = self.critic.forward(market_encoding, proposed_actions)
+            policy, value = self.actor_critic.forward(market_encoding, proposed_actions)
 
-            if np.random.rand() < self.place_epsilon:
-                action = np.random.randint(0, 3)
-            else:
-                action = int(Q_actions.max(1)[1])
+            action = int(torch.multinomial(policy, 1))
 
             if action == 0:
                 placed_order = [0, float(proposed_actions[0, 0])]
@@ -97,52 +82,20 @@ class Worker(object):
                 placed_order = [2]
 
             replay_place_action = placed_order
-            replay_orders = open_orders
 
-            replay_orders_actions = []
-            closed_orders = []
-            # go through each order
-            advantage, _ = self.order.forward([(market_encoding, int(len(open_orders)))], open_orders)
-            actions = advantage.max(1)[1]
-            for i, action in enumerate(actions):
-                if np.random.rand() < self.close_epsilon:
-                    action = np.random.randint(0, 2)
-
-                if action == 1:
-                    closed_orders.append(open_orders[i])
-                replay_orders_actions.append(action)
-
-            self.environment.step(placed_order, closed_orders)
+            self.environment.step(placed_order)
 
             if int(self.server.get('worker_update').decode("utf-8")):
-                self.replay.push(self.server)
+                server.set("experience_" + self.name, pickle.dumps(self.experience))
                 self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
-                self.actor = torch.load(models_loc + '/actor.pt').cpu()
-                self.critic = torch.load(models_loc + '/critic.pt').cpu()
-                self.order = torch.load(models_loc + '/order.pt').cpu()
+                self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
+                self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
 
             i += 1
 
 
 Experience = namedtuple('Experience',
                         ('time_states',
-                         'orders',
                          'queried_amount',
-                         'orders_actions',
                          'place_action',
-                         'reward',
-                         'orders_rewards'))
-
-
-class ReplayMemory(object):
-
-    def __init__(self):
-        self.experiences = []
-
-    def add_experience(self, experience):
-        self.experiences.append(experience)
-
-    def push(self, server, worker_name):
-        server.set(worker_name, pickle.dumps(self.experiences))
-
-        self.experiences = []
+                         'reward',))
