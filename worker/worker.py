@@ -38,11 +38,12 @@ class Worker(object):
     def run(self):
         value = self.environment.value
 
-        replay_time_states = []
-        replay_percent_in = 0
+        replay_time_states = None
+        replay_percent_in = None
         replay_proposed = None
         replay_place_action = None
-        replay_reward = 0
+        replay_mu = None
+        replay_reward = None
 
         time_states = []
         i = 0
@@ -64,6 +65,7 @@ class Worker(object):
                                               replay_percent_in
                                               replay_proposed,
                                               replay_place_action,
+                                              replay_mu,
                                               replay_reward))
 
             market_encoding = self.market_encoder.forward(torch.cat(time_states).cpu(), torch.Tensor([percent_in]).cpu(), 'cpu')
@@ -84,6 +86,7 @@ class Worker(object):
             else:
                 placed_order = [2]
 
+            replay_mu = policy[action]
             replay_place_action = placed_order[0]
 
             self.environment.step(placed_order)
@@ -102,4 +105,5 @@ Experience = namedtuple('Experience',
                          'percent_in',
                          'proposed',
                          'place_action',
-                         'reward',))
+                         'mu',
+                         'reward'))

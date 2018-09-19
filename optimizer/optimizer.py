@@ -35,6 +35,13 @@ class Optimizer(object):
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("optimizer_gamma").decode("utf-8"))
         self.tau = float(self.server.get("optimizer_tau").decode("utf-8"))
+        self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
+
+        self.proposed_weight = float(self.server.get("optimizer_proposed_weight").decode("utf-8"))
+        self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
+        self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
+        self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
+
         self.alpha = float(self.server.get("optimizer_alpha").decode("utf-8"))
         self.betas = float(self.server.get("optimizer_betas").decode("utf-8"))
         self.epsilon = float(self.server.get("optimizer_epsilon").decode("utf-8"))
@@ -64,6 +71,7 @@ class Optimizer(object):
             final_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
             proposed = torch.cat(batch.proposed).cuda()
             place_action = torch.Tensor(batch.place_action, device='cuda')
+            mu = torch.cat(batch.mu).cuda()
             reward = torch.cat(batch.reward, device='cuda')
 
             # calculate the market_encoding
@@ -73,18 +81,25 @@ class Optimizer(object):
             # proposed loss
             proposed_actions = self.PN.forward(initial_market_encoding)
             _, target_value = self.ACN_.forward(initial_market_encoding, proposed_actions)[1]
-            target_value.backward()
+            (self.proposed_weight * arget_value).backward()
 
             # critic loss
             expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
-            next_step_policy, next_step_value = self.ACN_.forward(final_market_encoding, proposed)
-            target_value = reward + (next_step_value * self.gamma)
+            this_step_policy, this_step_value = self.ACN_.forward(initial_market_encoding, proposed)
+            next_step_policy, next_step_value = self.ACN_.forward(final_market_encoding, proposed_actions)
+            delta_V = torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * self.gamma) - this_step_value)
+            v = this_step_value + delta_V
 
             critic_loss = F.smooth_l1_loss(expected_value, target_value)
-            critic_loss.backward()
+            (self.critic_weight * critic_loss).backward()
 
             # policy loss
-            torch.log(expected_policy.gather(1, place_action.view(-1, 1))) * (target_value - expected_value)
+            policy_loss = -torch.log(expected_policy.gather(1, place_action.view(-1, 1))) * delta_V
+            (self.actor_weight * policy_loss.mean()).backward()
+
+            # entropy
+            entropy_loss = -expected_policy * torch.log(expected_policy)
+            (self.entropy_weight * entropy_loss.mean()).backward()
 
             # take a step
             self.optimizer.step()
