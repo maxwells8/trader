@@ -68,7 +68,7 @@ class Optimizer(object):
             initial_time_states = torch.cat(batch.initial_time_states).cuda()
             initial_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
             final_time_states = torch.cat(batch.final_time_states).cuda()
-            final_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
+            final_percent_in = torch.Tensor(batch.final_percent_in, device='cuda')
             proposed = torch.cat(batch.proposed).cuda()
             place_action = torch.Tensor(batch.place_action, device='cuda')
             mu = torch.cat(batch.mu).cuda()
@@ -81,7 +81,7 @@ class Optimizer(object):
             # proposed loss
             proposed_actions = self.PN.forward(initial_market_encoding)
             _, target_value = self.ACN_.forward(initial_market_encoding, proposed_actions)[1]
-            (self.proposed_weight * arget_value).backward()
+            (self.proposed_weight * -target_value.mean()).backward()
 
             # critic loss
             expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)

@@ -38,35 +38,19 @@ class Worker(object):
     def run(self):
         value = self.environment.value
 
-        replay_time_states = None
-        replay_percent_in = None
+        replay_initial_time_states = None
+        replay_initial_percent_in = None
+        replay_final_time_states = None
+        replay_final_percent_in = None
         replay_proposed = None
         replay_place_action = None
         replay_mu = None
         replay_reward = None
 
-        time_states = []
+        state = self.environment.get_state()
         i = 0
         while True:
-            print(i)
-            state = self.environment.get_state()
-            if not state:
-                return value
-
-            replay_time_states = time_states
-
-            (time_states, percent_in), reward = state
-
-            replay_time_states.append(time_states[-1])
-            replay_percent_in = percent_in
-            replay_reward = reward
-            # add experience
-            self.experience.append(Experience(replay_time_states,
-                                              replay_percent_in
-                                              replay_proposed,
-                                              replay_place_action,
-                                              replay_mu,
-                                              replay_reward))
+            time_states, percent_in, reward = state
 
             market_encoding = self.market_encoder.forward(torch.cat(time_states).cpu(), torch.Tensor([percent_in]).cpu(), 'cpu')
 
@@ -91,18 +75,42 @@ class Worker(object):
 
             self.environment.step(placed_order)
 
-            if int(self.server.get('worker_update').decode("utf-8")):
-                server.set("experience_" + self.name, pickle.dumps(self.experience))
-                self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
-                self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
-                self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
+            # add experience
+            replay_initial_time_states = time_states
+            replay_initial_percent_in = percent_in
+
+            state = self.environment.get_state()
+            if not state:
+                break
+
+            time_states, percent_in, reward = state
+
+            replay_final_time_states = time_states
+            replay_final_percent_in = percent_in
+            replay_reward = reward
+            # add experience
+            self.experience.append(Experience(replay_initial_time_states,
+                                              replay_initial_percent_in,
+                                              replay_final_time_states,
+                                              replay_final_percent_in,
+                                              replay_proposed,
+                                              replay_place_action,
+                                              replay_mu,
+                                              replay_reward))
 
             i += 1
 
+        server.set("experience_" + self.name, pickle.dumps(self.experience))
+        self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
+        self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
+        self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
+
 
 Experience = namedtuple('Experience',
-                        ('time_states',
-                         'percent_in',
+                        ('inital_time_states',
+                         'initial_percent_in',
+                         'final_time_states',
+                         'final_percent_in',
                          'proposed',
                          'place_action',
                          'mu',

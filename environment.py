@@ -41,16 +41,13 @@ class Env(object):
         if self.cur_i == self.data.shape[0]:
             return False
 
-        return self.time_states, self.orders, self.balance, self.calculate_value(), self.reward(), self.orders_rewards()
+        return self.time_states, (self.value - self.balance) / self.value, self.reward()
 
-    def step(self, placed_order, closed_orders_indices):
+    def step(self, placed_order):
         if placed_order[0] == 0:
-            self.buy(placed_order[1])
+            self.buy(placed_order[1] * self.balance)
         elif placed_order[0] == 1:
-            self.sell(placed_order[1])
-
-        for order_i in sorted(closed_orders_indices, reverse=True):
-            self.close_order(order_i)
+            self.sell(placed_order[1] * self.balance)
 
         self.cur_i += 1
 
@@ -77,7 +74,7 @@ class Env(object):
     def buy(self, amount):
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] + (self.time_states[-1].spread / 2),
-                          quantity=self.balance * amount,
+                          quantity=amount,
                           buy=True)
 
         self.orders.append(new_order)
@@ -85,7 +82,7 @@ class Env(object):
     def sell(self, amount):
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] - (self.time_states[-1].spread / 2),
-                          quantity=self.balance * amount,
+                          quantity=amount,
                           buy=False)
 
         self.orders.append(new_order)
