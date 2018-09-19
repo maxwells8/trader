@@ -98,7 +98,7 @@ class Optimizer(object):
             (self.actor_weight * policy_loss.mean()).backward()
 
             # entropy
-            entropy_loss = -expected_policy * torch.log(expected_policy)
+            entropy_loss = expected_policy * torch.log(expected_policy)
             (self.entropy_weight * entropy_loss.mean()).backward()
 
             # take a step
