@@ -17,7 +17,8 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 """
 TODO:
-- update to the new network architecture
+- either make this work with variable time_state lengths, or don't let
+them come into the experience
 """
 class Optimizer(object):
 
@@ -42,24 +43,29 @@ class Optimizer(object):
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
 
-        self.alpha = float(self.server.get("optimizer_alpha").decode("utf-8"))
-        self.betas = float(self.server.get("optimizer_betas").decode("utf-8"))
-        self.epsilon = float(self.server.get("optimizer_epsilon").decode("utf-8"))
-        self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
+        # self.alpha = float(self.server.get("optimizer_alpha").decode("utf-8"))
+        # self.betas = float(self.server.get("optimizer_betas").decode("utf-8"))
+        # self.epsilon = float(self.server.get("optimizer_epsilon").decode("utf-8"))
+        # self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
 
         self.experience = []
-        self.optimizer = optim.Adam(self.MEN.parameters() +
-                                    self.PN.parameters() +
-                                    self.ACN.parameters(),
-                                    lr=self.alpha,
-                                    betas=self.betas,
-                                    eps=self.epsilon,
-                                    weight_decay=self.weight_penalty)
+        # self.optimizer = optim.Adam([self.MEN.parameters() +
+        #                             self.PN.parameters() +
+        #                             self.ACN.parameters()],
+        #                             lr=self.alpha,
+        #                             betas=self.betas,
+        #                             eps=self.epsilon,
+        #                             weight_decay=self.weight_penalty)
+        self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
+                                    [params for params in self.PN.parameters()] +
+                                    [params for params in self.ACN.parameters()])
 
 
     def run(self):
 
-        while len(self.experience) != 0:
+        self.experience = pickle.loads(self.server.get("experience_0"))
+
+        while True:
             # start grads anew
             self.optimizer.zero_grad()
 
@@ -73,7 +79,7 @@ class Optimizer(object):
             place_action = torch.Tensor(batch.place_action, device='cuda')
             mu = torch.cat(batch.mu).cuda()
             reward = torch.cat(batch.reward, device='cuda')
-
+            print("WOOHOO")
             # calculate the market_encoding
             initial_market_encoding = self.MEN.forward(initial_time_states, inital_percent_in, 'cuda')
             final_market_encoding = self.MEN_.forward(final_time_states, final_percent_in, 'cuda')

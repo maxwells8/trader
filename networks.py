@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 torch.manual_seed(0)
-D_BAR = 5
+D_BAR = 6
 D_MODEL = 256
 N_LSTM_LAYERS = 2
 # torch.cuda.manual_seed(0)
@@ -60,7 +60,6 @@ class Proposer(nn.Module):
         x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL + 1)))
         x = F.leaky_relu(self.fc2(x)) + x
         x = F.sigmoid(self.fc3(x))
-
         return x
 
 

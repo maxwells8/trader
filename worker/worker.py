@@ -24,7 +24,7 @@ class Worker(object):
 
     def __init__(self, source, name, models_loc, window):
 
-        self.environment = Env(source, window)
+        self.environment = Env(source, time_window=window)
         self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
         self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
         self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
@@ -49,13 +49,14 @@ class Worker(object):
 
         state = self.environment.get_state()
         i = 0
+        t0 = time.time()
         while True:
             time_states, percent_in, reward = state
 
             market_encoding = self.market_encoder.forward(torch.cat(time_states).cpu(), torch.Tensor([percent_in]).cpu(), 'cpu')
 
             proposed_actions = self.proposer.forward(market_encoding)
-            proposed_actions += torch.randn(1, 2).cpu() * self.sigma
+            proposed_actions = torch.nn.functional.sigmoid(proposed_actions + torch.randn(1, 2).cpu() * self.sigma)
 
             replay_proposed = proposed_actions
 
@@ -70,7 +71,7 @@ class Worker(object):
             else:
                 placed_order = [2]
 
-            replay_mu = policy[action]
+            replay_mu = policy[0, action]
             replay_place_action = placed_order[0]
 
             self.environment.step(placed_order)
@@ -99,15 +100,15 @@ class Worker(object):
                                               replay_reward))
 
             i += 1
+            if i%100 == 0:
+                print(str(i) + "\t" + str(time.time() - t0))
+            if i % 1000 == 0:
+                break
 
-        server.set("experience_" + self.name, pickle.dumps(self.experience))
-        self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
-        self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
-        self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
-
+        self.server.set("experience_" + self.name, pickle.dumps(self.experience))
 
 Experience = namedtuple('Experience',
-                        ('inital_time_states',
+                        ('initial_time_states',
                          'initial_percent_in',
                          'final_time_states',
                          'final_percent_in',

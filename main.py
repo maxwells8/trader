@@ -19,11 +19,14 @@ import optimizer
 
 
 if __name__ == "__main__":
-    # data_loc = normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)
-    source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
-    name = '0'
-    models_loc = './models'
-    window = 512
+    # # data_loc = normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)
+    # source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
+    # name = '0'
+    # models_loc = './models'
+    # window = 512
+    #
+    # p = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window))
+    # p.start()
 
-    p = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window))
-    p.start()
+    this_optimizer = optimizer.Optimizer('models')
+    this_optimizer.run()
