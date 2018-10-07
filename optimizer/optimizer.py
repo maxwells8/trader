@@ -3,12 +3,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
-import pandas as pd
 import time
-from collections import namedtuple
+import sys
+sys.path.insert(0, '../worker')
+from worker import Experience
 from networks import *
 from environment import *
-from worker import Experience
 import redis
 import pickle
 
@@ -34,7 +34,7 @@ class Optimizer(object):
         self.ACN_ = torch.load(self.models_loc + '/actor_critic.pt').cuda()
 
         self.server = redis.Redis("localhost")
-        self.gamma = float(self.server.get("optimizer_gamma").decode("utf-8"))
+        self.gamma = float(self.server.get("gamma").decode("utf-8"))
         self.tau = float(self.server.get("optimizer_tau").decode("utf-8"))
         self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
 
@@ -42,28 +42,22 @@ class Optimizer(object):
         self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
+        self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
 
-        # self.alpha = float(self.server.get("optimizer_alpha").decode("utf-8"))
-        # self.betas = float(self.server.get("optimizer_betas").decode("utf-8"))
-        # self.epsilon = float(self.server.get("optimizer_epsilon").decode("utf-8"))
-        # self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
+        self.batch_size = int(self.server.get("optimizer_batch_size").decode("utf-8"))
 
         self.experience = []
-        # self.optimizer = optim.Adam([self.MEN.parameters() +
-        #                             self.PN.parameters() +
-        #                             self.ACN.parameters()],
-        #                             lr=self.alpha,
-        #                             betas=self.betas,
-        #                             eps=self.epsilon,
-        #                             weight_decay=self.weight_penalty)
         self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
                                     [params for params in self.PN.parameters()] +
-                                    [params for params in self.ACN.parameters()])
+                                    [params for params in self.ACN.parameters()],
+                                    weight_decay=self.weight_penalty)
 
 
     def run(self):
 
-        self.experience = pickle.loads(self.server.get("experience_0"))
+        while len(self.experience) < self.batch_size:
+            experience = pickle.loads(self.server.lpop("experience"))
+            self.experience.append(experience)
 
         while True:
             # start grads anew
@@ -72,14 +66,13 @@ class Optimizer(object):
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
             initial_time_states = torch.cat(batch.initial_time_states).cuda()
-            initial_percent_in = torch.Tensor(batch.initial_percent_in, device='cuda')
+            initial_percent_in = torch.Tensor(batch.initial_percent_in).cuda()
+            mu = torch.Tensor(batch.mu).cuda()
+            action = torch.Tensor(batch.action).cuda()
+            reward = torch.Tensor(batch.reward).cuda()
             final_time_states = torch.cat(batch.final_time_states).cuda()
-            final_percent_in = torch.Tensor(batch.final_percent_in, device='cuda')
-            proposed = torch.cat(batch.proposed).cuda()
-            place_action = torch.Tensor(batch.place_action, device='cuda')
-            mu = torch.cat(batch.mu).cuda()
-            reward = torch.cat(batch.reward, device='cuda')
-            print("WOOHOO")
+            final_percent_in = torch.Tensor(batch.final_percent_in).cuda()
+
             # calculate the market_encoding
             initial_market_encoding = self.MEN.forward(initial_time_states, inital_percent_in, 'cuda')
             final_market_encoding = self.MEN_.forward(final_time_states, final_percent_in, 'cuda')

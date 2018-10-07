@@ -19,14 +19,31 @@ import optimizer
 
 
 if __name__ == "__main__":
-    # # data_loc = normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)
+    server = redis.Redis("localhost")
+    ##### data_loc = normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)
+
     # source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     # name = '0'
     # models_loc = './models'
-    # window = 512
+    # window = 256
+    # n_steps = 1440
     #
-    # p = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window))
+    # server.set("sigma_" + name, 0.05)
+    #
+    # p = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window, n_steps))
     # p.start()
+
+    server.set("gamma", 0.99)
+    server.set("optimizer_tau", 0.05)
+    server.set("optimizer_max_rho", 1)
+
+    server.set("optimizer_proposed_weight", 2/9)
+    server.set("optimizer_critic_weight", 2/9)
+    server.set("optimizer_actor_weight", 2/9)
+    server.set("optimizer_entropy_weight", 2/9)
+    server.set("optimizer_weight_penalty", 1/9)
+
+    server.set("optimizer_batch_size", 4)
 
     this_optimizer = optimizer.Optimizer('models')
     this_optimizer.run()
