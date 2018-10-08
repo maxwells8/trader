@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv"
     name = '0'
-    models_loc = './models'
+    models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
     window = 256
     n_steps = 1000000
 
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     name = '1'
-    models_loc = './models'
+    models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
     window = 256
     n_steps = 1000000
 
@@ -48,13 +48,13 @@ if __name__ == "__main__":
     server.set("optimizer_tau", 0.05)
     server.set("optimizer_max_rho", 1)
 
-    server.set("optimizer_proposed_weight", 2/9)
-    server.set("optimizer_critic_weight", 2/9)
-    server.set("optimizer_actor_weight", 2/9)
-    server.set("optimizer_entropy_weight", 2/9)
-    server.set("optimizer_weight_penalty", 1/9)
+    server.set("optimizer_proposed_weight", 1)
+    server.set("optimizer_critic_weight", 1)
+    server.set("optimizer_actor_weight", 1)
+    server.set("optimizer_entropy_weight", 0.1)
+    server.set("optimizer_weight_penalty", 0.05)
 
     server.set("optimizer_batch_size", 32)
 
-    this_optimizer = optimizer.Optimizer('models')
+    this_optimizer = optimizer.Optimizer('C:\\Users\\Preston\\Programming\\trader\\models')
     this_optimizer.run()

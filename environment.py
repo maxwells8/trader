@@ -11,7 +11,7 @@ it, not just at the very beginning of the tick.
 """
 class Env(object):
 
-    def __init__(self, source, spread_func=None, time_window=512):
+    def __init__(self, source, spread_func=None, time_window=256):
         self.data = pd.DataFrame(pd.read_csv(source))
 
         self.time_window = time_window

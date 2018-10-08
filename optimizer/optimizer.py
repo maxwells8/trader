@@ -25,9 +25,18 @@ class Optimizer(object):
     def __init__(self, models_loc):
         self.models_loc = models_loc
         # networks
-        self.MEN = torch.load(self.models_loc + '/market_encoder.pt').cuda()
-        self.PN = torch.load(self.models_loc + '/proposer.pt').cuda()
-        self.ACN = torch.load(self.models_loc + '/actor_critic.pt').cuda()
+        try:
+            self.MEN = torch.load(self.models_loc + '/market_encoder.pt').cuda()
+            self.PN = torch.load(self.models_loc + '/proposer.pt').cuda()
+            self.ACN = torch.load(self.models_loc + '/actor_critic.pt').cuda()
+        except Exception:
+            self.MEN = MarketEncoder().cuda()
+            self.PN = Proposer().cuda()
+            self.ACN = ActorCritic().cuda()
+
+            torch.save(self.MEN, self.models_loc + '/market_encoder.pt')
+            torch.save(self.PN, self.models_loc + '/proposer.pt')
+            torch.save(self.ACN, self.models_loc + '/actor_critic.pt')
 
         # target networks
         self.MEN_ = torch.load(self.models_loc + '/market_encoder.pt').cuda()
@@ -40,6 +49,7 @@ class Optimizer(object):
         self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
 
         self.proposed_weight = float(self.server.get("optimizer_proposed_weight").decode("utf-8"))
+        self.proposed_non_zero_weight = float(self.server.get("optimizer_proposed_non_zero_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
@@ -60,13 +70,9 @@ class Optimizer(object):
         while True:
             # read in experience from the queue
             while len(self.experience) < self.batch_size:
-                experience = self.server.lpop("experience")
-                if type(experience) == type(None):
-                    time.sleep(0.1)
-                else:
-                    experience = pickle.loads(experience)
-                    self.experience.append(experience)
-
+                experience = self.server.blpop("experience")[1]
+                experience = pickle.loads(experience)
+                self.experience.append(experience)
             # start grads anew
             self.optimizer.zero_grad()
 
@@ -89,7 +95,10 @@ class Optimizer(object):
             # proposed loss
             proposed_actions = self.PN.forward(initial_market_encoding)
             _, target_value = self.ACN_.forward(initial_market_encoding_, proposed_actions)
-            (self.proposed_weight * -target_value.mean()).backward(retain_graph=True)
+            (self.proposed_weight * -target_value.sum()).backward(retain_graph=True)
+
+            # proposed entropy loss
+            (self.proposed_non_zero_weight * (proposed_actions)**2).sum().backward(retain_graph=True)
 
             # critic loss
             expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
@@ -103,16 +112,16 @@ class Optimizer(object):
             delta_V = torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * self.gamma) - this_step_value)
             v = this_step_value + delta_V
 
-            critic_loss = nn.MSELoss()(expected_value, v)
+            critic_loss = F.smooth_l1_loss(expected_value, v)
             (self.critic_weight * critic_loss).backward(retain_graph=True)
 
             # policy loss
             policy_loss = -torch.log(expected_policy.gather(1, place_action.view(-1, 1))) * delta_V
-            (self.actor_weight * policy_loss.mean()).backward(retain_graph=True)
+            (self.actor_weight * policy_loss.sum()).backward(retain_graph=True)
 
-            # entropy
+            # policy entropy
             entropy_loss = expected_policy * torch.log(expected_policy)
-            (self.entropy_weight * entropy_loss.mean()).backward()
+            (self.entropy_weight * entropy_loss.sum()).backward()
 
             # take a step
             self.optimizer.step()
@@ -123,8 +132,8 @@ class Optimizer(object):
                     param = (self.tau * list(net[1].parameters())[index]) + ((1 - self.tau) * param)
 
             self.experience = []
-            if n_steps % 1000 == 0:
-                print("saving models after {n} steps".format(n=n_steps))
+            if n_steps % 10 == 0:
+                print("saving models after {n} experiences and {s} steps".format(n=n_steps*self.batch_size, s=n_steps))
                 torch.save(self.MEN, self.models_loc + "/market_encoder.pt")
                 torch.save(self.PN, self.models_loc + "/proposer.pt")
                 torch.save(self.ACN, self.models_loc + "/actor_critic.pt")
