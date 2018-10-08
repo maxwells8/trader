@@ -48,4 +48,5 @@ def normalize_and_save(source, print_out=False):
 
     return save_location
 
-# normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv")
+# normalize_and_save("data/DAT_MT_EURUSD_M1_2016.csv", True)
+# normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)

@@ -125,6 +125,13 @@ class Env(object):
 
         return rewards
 
+    def reset(self):
+        self.prev_value = 1
+        self.value = 1
+        self.balance = 1
+        for _ in range(len(self.orders)):
+            self.orders.pop()
+
     def default_spread_func():
         return np.random.gamma(3, 2 / 10000)
 

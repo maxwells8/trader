@@ -56,10 +56,10 @@ class Proposer(nn.Module):
         self.fc2 = nn.Linear(D_MODEL, D_MODEL)
         self.fc3 = nn.Linear(D_MODEL, 2)
 
-    def forward(self, market_encoding):
+    def forward(self, market_encoding, exploration_parameter=0):
         x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL + 1)))
         x = F.leaky_relu(self.fc2(x)) + x
-        x = F.sigmoid(self.fc3(x))
+        x = F.sigmoid(self.fc3(x) + exploration_parameter)
         return x
 
 
@@ -157,10 +157,11 @@ inputs = [torch.randn([1, 1, D_BAR]) for _ in range(512)]
 # t0 = time.time()
 # for _ in range(n):
 market_encoding = ME.forward(torch.cat(inputs).cuda(), torch.Tensor([0.5]).cuda(), 'cuda')
-proposed_actions = P.forward(market_encoding) + (torch.randn(1, 2).cuda() * 0.05)
+proposed_actions = P.forward(market_encoding)
+print(proposed_actions)
+proposed_actions = P.forward(market_encoding, 0.1)
+print(proposed_actions)
 policy, value = AC.forward(market_encoding, proposed_actions)
-print(proposed_actions, policy, value)
-print(torch.log(policy)[0, 1]*value)
 (torch.log(policy)[0, 1]*value).backward()
 
 torch.save(ME, "models/market_encoder.pt")

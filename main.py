@@ -22,16 +22,27 @@ if __name__ == "__main__":
     server = redis.Redis("localhost")
     ##### data_loc = normalize_and_save("data/DAT_MT_EURUSD_M1_2017.csv", True)
 
-    # source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
-    # name = '0'
-    # models_loc = './models'
-    # window = 256
-    # n_steps = 1440
-    #
-    # server.set("sigma_" + name, 0.05)
-    #
-    # p = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window, n_steps))
-    # p.start()
+    source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv"
+    name = '0'
+    models_loc = './models'
+    window = 256
+    n_steps = 1000000
+
+    server.set("sigma_" + name, 0.01)
+
+    p0 = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window, n_steps))
+    p0.start()
+
+    source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
+    name = '1'
+    models_loc = './models'
+    window = 256
+    n_steps = 1000000
+
+    server.set("sigma_" + name, 0.1)
+
+    p1 = multiprocessing.Process(target=start_worker, args=(source, name, models_loc, window, n_steps))
+    p1.start()
 
     server.set("gamma", 0.99)
     server.set("optimizer_tau", 0.05)
@@ -43,7 +54,7 @@ if __name__ == "__main__":
     server.set("optimizer_entropy_weight", 2/9)
     server.set("optimizer_weight_penalty", 1/9)
 
-    server.set("optimizer_batch_size", 4)
+    server.set("optimizer_batch_size", 32)
 
     this_optimizer = optimizer.Optimizer('models')
     this_optimizer.run()

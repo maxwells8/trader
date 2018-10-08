@@ -26,6 +26,7 @@ class Worker(object):
         self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
         self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
         self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
+        self.models_loc = models_loc
 
         self.server = redis.Redis("localhost")
         self.name = name
@@ -36,14 +37,16 @@ class Worker(object):
         self.experience = []
 
     def run(self):
-        initial_time_states, initial_percent_in, _ = self.environment.get_state()
+        reward_ema = 0
+        ema_parameter = 0.01
+        state = self.environment.get_state()
+        initial_time_states, initial_percent_in, _ = state
         t0 = time.time()
         for i_step in range(self.n_steps):
-            
+
             market_encoding = self.market_encoder.forward(torch.cat(initial_time_states).cpu(), torch.Tensor([initial_percent_in]).cpu(), 'cpu')
 
-            proposed_actions = self.proposer.forward(market_encoding)
-            queried_actions = torch.nn.functional.sigmoid(proposed_actions + torch.randn(1, 2).cpu() * self.sigma)
+            queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.sigma)
 
             policy, value = self.actor_critic.forward(market_encoding, queried_actions)
 
@@ -59,18 +62,31 @@ class Worker(object):
 
             self.environment.step(placed_order)
 
-            final_time_states, final_percent_in, reward = self.environment.get_state()
+            state = self.environment.get_state()
+            if not state:
+                break
 
+            final_time_states, final_percent_in, reward = state
+            reward_ema = ema_parameter * reward + (1 - ema_parameter) * reward_ema
             if len(initial_time_states) == self.window:
-                experience = Experience(torch.cat(initial_time_states), initial_percent_in, mu, proposed_actions, action, reward, torch.cat(final_time_states), final_percent_in)
+                experience = Experience(torch.cat(initial_time_states), initial_percent_in, mu, queried_actions, action, reward, torch.cat(final_time_states), final_percent_in)
                 self.experience.append(experience)
                 self.server.rpush("experience", pickle.dumps(experience))
 
             initial_time_states = final_time_states
             initial_percent_in = final_percent_in
 
-            if i_step % 100 == 0:
-                print(i_step, time.time() - t0)
+            if i_step % 1000 == 0:
+                print("{name}\'s ema reward after {steps} steps: {reward}".format(name=self.name, steps=i_step, reward=reward_ema))
+                self.market_encoder = torch.load(self.models_loc + '/market_encoder.pt').cpu()
+                self.proposer = torch.load(self.models_loc + '/proposer.pt').cpu()
+                self.actor_critic = torch.load(self.models_loc + '/actor_critic.pt').cpu()
+                self.environment.reset()
+                state = self.environment.get_state()
+                if not state:
+                    break
+                initial_time_states, initial_percent_in, _ = state
+
 
 Experience = namedtuple('Experience', ('initial_time_states',
                                        'initial_percent_in',
