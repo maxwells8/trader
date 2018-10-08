@@ -33,12 +33,13 @@ class Worker(object):
 
         self.window = window
         self.n_steps = n_steps
+        self.experience = []
 
     def run(self):
         initial_time_states, initial_percent_in, _ = self.environment.get_state()
         t0 = time.time()
         for i_step in range(self.n_steps):
-
+            
             market_encoding = self.market_encoder.forward(torch.cat(initial_time_states).cpu(), torch.Tensor([initial_percent_in]).cpu(), 'cpu')
 
             proposed_actions = self.proposer.forward(market_encoding)
@@ -56,23 +57,26 @@ class Worker(object):
             else:
                 placed_order = [2]
 
-            action = placed_order
-
             self.environment.step(placed_order)
 
             final_time_states, final_percent_in, reward = self.environment.get_state()
 
             if len(initial_time_states) == self.window:
-                experience = Experience(torch.cat(initial_time_states), initial_percent_in, mu, action, reward, torch.cat(final_time_states), final_percent_in)
+                experience = Experience(torch.cat(initial_time_states), initial_percent_in, mu, proposed_actions, action, reward, torch.cat(final_time_states), final_percent_in)
+                self.experience.append(experience)
                 self.server.rpush("experience", pickle.dumps(experience))
 
             initial_time_states = final_time_states
             initial_percent_in = final_percent_in
 
+            if i_step % 100 == 0:
+                print(i_step, time.time() - t0)
+
 Experience = namedtuple('Experience', ('initial_time_states',
                                        'initial_percent_in',
                                        'mu',
-                                       'action',
+                                       'proposed_actions',
+                                       'place_action',
                                        'reward',
                                        'final_time_states',
                                        'final_percent_in'))

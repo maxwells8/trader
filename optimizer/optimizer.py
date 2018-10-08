@@ -65,21 +65,22 @@ class Optimizer(object):
 
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
-            initial_time_states = torch.cat(batch.initial_time_states).cuda()
-            initial_percent_in = torch.Tensor(batch.initial_percent_in).cuda()
-            mu = torch.Tensor(batch.mu).cuda()
-            action = torch.Tensor(batch.action).cuda()
-            reward = torch.Tensor(batch.reward).cuda()
-            final_time_states = torch.cat(batch.final_time_states).cuda()
-            final_percent_in = torch.Tensor(batch.final_percent_in).cuda()
+            initial_time_states = torch.cat(batch.initial_time_states, dim=1).cuda()
+            initial_percent_in = torch.Tensor(batch.initial_percent_in).resize(self.batch_size, 1).cuda()
+            mu = torch.Tensor(batch.mu).resize(self.batch_size, 1).cuda()
+            proposed = torch.cat(batch.proposed_actions).resize(self.batch_size, 2).cuda()
+            place_action = torch.Tensor(batch.place_action).resize(self.batch_size, 1).cuda()
+            reward = torch.Tensor(batch.reward).resize(self.batch_size, 1).cuda()
+            final_time_states = torch.cat(batch.final_time_states, dim=1).cuda()
+            final_percent_in = torch.Tensor(batch.final_percent_in).resize(self.batch_size, 1).cuda()
 
             # calculate the market_encoding
-            initial_market_encoding = self.MEN.forward(initial_time_states, inital_percent_in, 'cuda')
+            initial_market_encoding = self.MEN.forward(initial_time_states, initial_percent_in, 'cuda')
             final_market_encoding = self.MEN_.forward(final_time_states, final_percent_in, 'cuda')
 
             # proposed loss
             proposed_actions = self.PN.forward(initial_market_encoding)
-            _, target_value = self.ACN_.forward(initial_market_encoding, proposed_actions)[1]
+            _, target_value = self.ACN_.forward(initial_market_encoding, proposed_actions)
             (self.proposed_weight * -target_value.mean()).backward()
 
             # critic loss
