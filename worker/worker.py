@@ -26,9 +26,15 @@ class Worker(object):
     def __init__(self, source, name, models_loc, window, n_steps, test=False):
 
         self.environment = Env(source, time_window=window)
-        self.market_encoder = torch.load(models_loc + '/market_encoder.pt').cpu()
-        self.proposer = torch.load(models_loc + '/proposer.pt').cpu()
-        self.actor_critic = torch.load(models_loc + '/actor_critic.pt').cpu()
+        self.market_encoder = MarketEncoder()
+        self.proposer = Proposer()
+        self.actor_critic = ActorCritic()
+        self.market_encoder.load_state_dict(torch.load(models_loc + '/market_encoder.pt'))
+        self.proposer.load_state_dict(torch.load(models_loc + '/proposer.pt'))
+        self.actor_critic.load_state_dict(torch.load(models_loc + '/actor_critic.pt'))
+        self.market_encoder = self.market_encoder.cpu()
+        self.proposer = self.proposer.cpu()
+        self.actor_critic = self.actor_critic.cpu()
         self.models_loc = models_loc
 
         self.server = redis.Redis("localhost")
@@ -51,6 +57,7 @@ class Worker(object):
         std = initial_time_states[:, 0, :4].std()
         initial_time_states[:, 0, :4] = (initial_time_states[:, 0, :4] - mean) / std
         initial_time_states[:, 0, 5] = initial_time_states[:, 0, 5] / std
+        t0 = time.time()
         for i_step in range(self.n_steps):
 
             market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), 'cpu')
@@ -62,8 +69,6 @@ class Worker(object):
             if self.test:
                 print("queried_actions:", queried_actions)
                 print("(policy, value):", policy, value)
-                print("reward_ema:", reward_ema)
-                print("past 100 rewards:", np.sum(rewards))
 
             action = int(torch.multinomial(policy, 1))
             mu = policy[0, action]
@@ -90,7 +95,7 @@ class Worker(object):
 
             reward_ema = ema_parameter * reward + (1 - ema_parameter) * reward_ema
             rewards.append(reward)
-            if len(rewards) > 100:
+            if len(rewards) > self.window:
                 rewards.pop(0)
 
             if len(initial_time_states) == self.window:
@@ -101,16 +106,20 @@ class Worker(object):
             initial_time_states = final_time_states
             initial_percent_in = final_percent_in
 
-            if i_step % 100 == 0:
-                print("{name} after {steps} steps: ema = {ema}, sum past 100 rewards = {reward}".format(name=self.name, steps=i_step, ema=reward_ema, reward=np.sum(rewards)))
+            if i_step % self.window == 0:
+                print("name: {name}, steps: {steps}, time: {time}, ema = {ema}, sum past {window} rewards = {reward}".format(name=self.name, steps=i_step, time=time.time()-t0, ema=reward_ema, window=self.window, reward=np.sum(rewards)))
+                t0 = time.time()
 
-            if i_step % 100 == 0:
+            if i_step % self.window == 0:
                 # doing this while loop in case the models are being written to while trying to read them
                 while True:
                     try:
-                        self.market_encoder = torch.load(self.models_loc + '/market_encoder.pt').cpu()
-                        self.proposer = torch.load(self.models_loc + '/proposer.pt').cpu()
-                        self.actor_critic = torch.load(self.models_loc + '/actor_critic.pt').cpu()
+                        self.market_encoder.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
+                        self.proposer.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
+                        self.actor_critic.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+                        self.market_encoder = self.market_encoder.cpu()
+                        self.proposer = self.proposer.cpu()
+                        self.actor_critic = self.actor_critic.cpu()
                         break
                     except Exception:
                         pass
@@ -137,11 +146,11 @@ Experience = namedtuple('Experience', ('initial_time_states',
 
 if __name__ == "__main__":
     server = redis.Redis("localhost")
-    server.set("sigma_3", 0)
+    server.set("sigma_4", 0)
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     models_loc = '../models'
     window = 256
     n_steps = 1000000
 
-    worker = Worker(source, "3", models_loc, window, n_steps, True)
+    worker = Worker(source, "4", models_loc, window, n_steps, True)
     worker.run()

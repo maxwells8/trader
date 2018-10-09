@@ -88,18 +88,20 @@ class Env(object):
 
     def buy(self, amount):
         self.balance -= amount
+        self.balance -= self.time_states[-1].spread / 2
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] + (self.time_states[-1].spread / 2),
-                          quantity=amount,
+                          quantity=amount / self.data['close'][self.cur_i],
                           buy=True)
 
         self.orders.append(new_order)
 
     def sell(self, amount):
         self.balance -= amount
+        self.balance -= self.time_states[-1].spread / 2
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] - (self.time_states[-1].spread / 2),
-                          quantity=amount,
+                          quantity=-amount / self.data['close'][self.cur_i],
                           buy=False)
         self.orders.append(new_order)
 
@@ -154,7 +156,7 @@ class Order(object):
         if self.buy:
             return close_price * self.quantity
         else:
-            return close_price * self.quantity
+            return -close_price * self.quantity
 
 
 class TimeState(object):
@@ -194,3 +196,15 @@ class TimeState(object):
                                              self.spread]).float().view(1, 1, -1)
 
         return self.tensor_repr
+
+if __name__ == "__main__":
+    env = Env("C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv")
+    while True:
+        print(env.get_state())
+        print(env.value)
+        action = int(input("action: "))
+        if action != 2:
+            quantity = float(input("quantity: "))
+            env.step([action, quantity])
+        else:
+            env.step([action])

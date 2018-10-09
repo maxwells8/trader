@@ -4,6 +4,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import time
+import heapq
 import sys
 sys.path.insert(0, '../worker')
 from worker import Experience
@@ -25,23 +26,34 @@ class Optimizer(object):
     def __init__(self, models_loc):
         self.models_loc = models_loc
         # networks
+        self.MEN = MarketEncoder()
+        self.PN = Proposer()
+        self.ACN = ActorCritic()
         try:
-            self.MEN = torch.load(self.models_loc + '/market_encoder.pt').cuda()
-            self.PN = torch.load(self.models_loc + '/proposer.pt').cuda()
-            self.ACN = torch.load(self.models_loc + '/actor_critic.pt').cuda()
+            self.MEN.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
+            self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
+            self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
         except Exception:
             self.MEN = MarketEncoder().cuda()
             self.PN = Proposer().cuda()
             self.ACN = ActorCritic().cuda()
 
-            torch.save(self.MEN, self.models_loc + '/market_encoder.pt')
-            torch.save(self.PN, self.models_loc + '/proposer.pt')
-            torch.save(self.ACN, self.models_loc + '/actor_critic.pt')
+            torch.save(self.MEN.state_dict(), self.models_loc + '/market_encoder.pt')
+            torch.save(self.PN.state_dict(), self.models_loc + '/proposer.pt')
+            torch.save(self.ACN.state_dict(), self.models_loc + '/actor_critic.pt')
 
         # target networks
-        self.MEN_ = torch.load(self.models_loc + '/market_encoder.pt').cuda()
-        self.PN_ = torch.load(self.models_loc + '/proposer.pt').cuda()
-        self.ACN_ = torch.load(self.models_loc + '/actor_critic.pt').cuda()
+        self.MEN_ = MarketEncoder()
+        self.PN_ = Proposer()
+        self.ACN_ = ActorCritic()
+
+        self.MEN_.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
+        self.PN_.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
+        self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+
+        self.MEN_ = self.MEN_.cuda()
+        self.PN_ = self.PN_.cuda()
+        self.ACN_ = self.ACN_.cuda()
 
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
@@ -54,38 +66,63 @@ class Optimizer(object):
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
         self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
+        self.learning_rate = float(self.server.get("optimizer_learning_rate").decode("utf-8"))
 
-        self.batch_size = int(self.server.get("optimizer_batch_size").decode("utf-8"))
+        self.queued_batch_size = int(self.server.get("optimizer_queued_batch_size").decode("utf-8"))
+        self.prioritized_batch_size = int(self.server.get("optimizer_prioritized_batch_size").decode("utf-8"))
 
-        self.experience = []
-        self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
-                                    [params for params in self.PN.parameters()] +
-                                    [params for params in self.ACN.parameters()],
-                                    weight_decay=self.weight_penalty)
+        self.queued_experience = []
+        self.prioritized_experience = []
+        try:
+            self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
+                                        [params for params in self.PN.parameters()] +
+                                        [params for params in self.ACN.parameters()],
+                                        weight_decay=self.weight_penalty)
+            self.optimizer.load_state_dict(torch.load(models_loc + "/optimizer.pt"))
 
+        except:
+            self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
+                                        [params for params in self.PN.parameters()] +
+                                        [params for params in self.ACN.parameters()],
+                                        lr=self.learning_rate,
+                                        weight_decay=self.weight_penalty)
+            torch.save(self.optimizer.state_dict(), self.models_loc + '/optimizer.pt')
 
     def run(self):
 
-        n_steps = 0
+        n_experiences = 0
+        step = 1
         while True:
             # read in experience from the queue
-            while len(self.experience) < self.batch_size:
-                experience = self.server.blpop("experience")[1]
-                experience = pickle.loads(experience)
-                self.experience.append(experience)
+            while True:
+                if (len(self.queued_experience) < self.queued_batch_size and self.server.llen("experience") > 0):
+                    experience = self.server.lpop("experience")
+                    experience = pickle.loads(experience)
+                    self.queued_experience.append(experience)
+                    n_experiences += 1
+                elif step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size):
+                    break
+                else:
+                    experience = self.server.blpop("experience")[1]
+                    experience = pickle.loads(experience)
+                    self.queued_experience.append(experience)
+                    n_experiences += 1
+
+            experiences = self.queued_experience + self.prioritized_experience
+
             # start grads anew
             self.optimizer.zero_grad()
-
+            self.ACN_.zero_grad()
             # get the inputs to the networks in the right form
-            batch = Experience(*zip(*self.experience))  # maybe restructure this so that we aren't using the entire experience each batch
-            initial_time_states = torch.cat(batch.initial_time_states, dim=1).cuda()
-            initial_percent_in = torch.Tensor(batch.initial_percent_in).resize(self.batch_size, 1).cuda()
-            mu = torch.Tensor(batch.mu).resize(self.batch_size, 1).cuda()
-            proposed = torch.cat(batch.proposed_actions).resize(self.batch_size, 2).cuda()
-            place_action = torch.Tensor(batch.place_action).long().resize(self.batch_size, 1).cuda()
-            reward = torch.Tensor(batch.reward).resize(self.batch_size, 1).cuda()
-            final_time_states = torch.cat(batch.final_time_states, dim=1).cuda()
-            final_percent_in = torch.Tensor(batch.final_percent_in).resize(self.batch_size, 1).cuda()
+            batch = Experience(*zip(*experiences))
+            initial_time_states = torch.cat(batch.initial_time_states, dim=1).detach().cuda()
+            initial_percent_in = torch.Tensor(batch.initial_percent_in).resize(len(experiences), 1).cuda()
+            mu = torch.Tensor(batch.mu).resize(len(experiences), 1).cuda()
+            proposed = torch.cat(batch.proposed_actions).resize(len(experiences), 2).detach().cuda()
+            place_action = torch.Tensor(batch.place_action).long().resize(len(experiences), 1).cuda()
+            reward = torch.Tensor(batch.reward).resize(len(experiences), 1).cuda()
+            final_time_states = torch.cat(batch.final_time_states, dim=1).detach().cuda()
+            final_percent_in = torch.Tensor(batch.final_percent_in).resize(len(experiences), 1).cuda()
 
             # calculate the market_encoding
             initial_market_encoding = self.MEN.forward(initial_time_states, initial_percent_in, 'cuda')
@@ -95,10 +132,10 @@ class Optimizer(object):
             # proposed loss
             proposed_actions = self.PN.forward(initial_market_encoding)
             _, target_value = self.ACN_.forward(initial_market_encoding_, proposed_actions)
-            (self.proposed_weight * -target_value.sum()).backward(retain_graph=True)
+            proposed_loss = -target_value.mean()
 
             # proposed entropy loss
-            (self.proposed_non_zero_weight * (proposed_actions)**2).sum().backward(retain_graph=True)
+            proposed_non_zero_loss = torch.abs(proposed_actions).mean()
 
             # critic loss
             expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
@@ -113,29 +150,62 @@ class Optimizer(object):
             v = this_step_value + delta_V
 
             critic_loss = F.smooth_l1_loss(expected_value, v)
-            (self.critic_weight * critic_loss).backward(retain_graph=True)
 
             # policy loss
-            policy_loss = -torch.log(expected_policy.gather(1, place_action.view(-1, 1))) * delta_V
-            (self.actor_weight * policy_loss.sum()).backward(retain_graph=True)
+            policy_loss = (-torch.max(torch.Tensor([-5]), torch.log(expected_policy.gather(1, place_action.view(-1, 1)))) * delta_V).mean()
 
             # policy entropy
-            entropy_loss = expected_policy * torch.log(expected_policy)
-            (self.entropy_weight * entropy_loss.sum()).backward()
+            entropy_loss = (expected_policy * torch.max(torch.Tensor([-5]), torch.log(expected_policy))).mean()
 
-            # take a step
+            print("p", proposed_loss * self.proposed_weight)
+            print("pnz", proposed_non_zero_loss * self.proposed_non_zero_weight)
+            print("c", critic_loss * self.critic_weight)
+            print("pi", policy_loss * self.actor_weight)
+            print("ent", entropy_loss * self.entropy_weight)
+            # add all the losses, and take a step
+            total_loss = proposed_loss * self.proposed_weight
+            total_loss += proposed_non_zero_loss * self.proposed_non_zero_weight
+            total_loss += critic_loss * self.critic_weight
+            total_loss += policy_loss * self.actor_weight
+            total_loss += entropy_loss * self.entropy_weight
+
+            print("tot", total_loss)
+            total_loss.backward()
             self.optimizer.step()
 
             # update the target networks using a exponential moving average
             for net in [(self.MEN_, self.MEN), (self.PN_, self.PN), (self.ACN_, self.ACN)]:
+                for param in net[1].parameters():
+                    param = torch.zeros(param.size()).copy_(param)
                 for index, param in enumerate(net[0].parameters()):
-                    param = (self.tau * list(net[1].parameters())[index]) + ((1 - self.tau) * param)
+                    param = ((self.tau * list(net[1].parameters())[index]) + ((1 - self.tau) * param)).detach()
 
-            self.experience = []
-            if n_steps % 10 == 0:
-                print("saving models after {n} experiences and {s} steps".format(n=n_steps*self.batch_size, s=n_steps))
-                torch.save(self.MEN, self.models_loc + "/market_encoder.pt")
-                torch.save(self.PN, self.models_loc + "/proposer.pt")
-                torch.save(self.ACN, self.models_loc + "/actor_critic.pt")
+            if step % 10 == 0:
+                print("n experiences: {n}, steps: {s}, loss: {l}".format(n=n_experiences, s=step, l=total_loss))
+                torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
+                torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
+                torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
+                torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
+                self.MEN = MarketEncoder()
+                self.PN = Proposer()
+                self.ACN = ActorCritic()
+                self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
+                                            [params for params in self.PN.parameters()] +
+                                            [params for params in self.ACN.parameters()],
+                                            weight_decay=self.weight_penalty)
+                self.MEN.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
+                self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
+                self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+                self.optimizer.load_state_dict(torch.load(self.models_loc + "/optimizer.pt"))
 
-            n_steps += 1
+            for i, experience in enumerate(self.queued_experience):
+                if len(self.prioritized_experience) == self.prioritized_batch_size:
+                    smallest, i_smallest = torch.min(torch.abs(delta_V[len(self.queued_experience):]), dim=0)
+                    if torch.abs(delta_V[i]) > smallest:
+                        self.prioritized_experience[i_smallest] = experience
+                        delta_V[len(self.queued_experience) + i_smallest] = torch.abs(delta_V[i])
+                else:
+                    self.prioritized_experience.append(experience)
+
+            self.queued_experience = []
+            step += 1
