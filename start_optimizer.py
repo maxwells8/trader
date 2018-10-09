@@ -12,12 +12,12 @@ server.set("optimizer_max_rho", 1)
 
 server.set("optimizer_proposed_weight", 0.5)
 server.set("optimizer_proposed_non_zero_weight", 0.05)
-server.set("optimizer_critic_weight", 1)
+server.set("optimizer_critic_weight", 2)
 server.set("optimizer_actor_weight", 0.5)
-server.set("optimizer_entropy_weight", 0.25)
+server.set("optimizer_entropy_weight", 0.1)
 server.set("optimizer_weight_penalty", 0.01)
 
-server.set("optimizer_learning_rate", 0.0001)
+server.set("optimizer_learning_rate", 0.001)
 
 server.set("optimizer_prioritized_batch_size", 64)
 server.set("optimizer_queued_batch_size", 32)

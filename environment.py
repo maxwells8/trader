@@ -88,7 +88,7 @@ class Env(object):
 
     def buy(self, amount):
         self.balance -= amount
-        self.balance -= self.time_states[-1].spread / 2
+        self.balance -= amount * self.time_states[-1].spread / 2
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] + (self.time_states[-1].spread / 2),
                           quantity=amount / self.data['close'][self.cur_i],
@@ -98,7 +98,7 @@ class Env(object):
 
     def sell(self, amount):
         self.balance -= amount
-        self.balance -= self.time_states[-1].spread / 2
+        self.balance -= amount * self.time_states[-1].spread / 2
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i] - (self.time_states[-1].spread / 2),
                           quantity=-amount / self.data['close'][self.cur_i],

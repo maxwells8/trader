@@ -149,7 +149,7 @@ class Optimizer(object):
             delta_V = torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * self.gamma) - this_step_value)
             v = this_step_value + delta_V
 
-            critic_loss = F.smooth_l1_loss(expected_value, v)
+            critic_loss = F.l1_loss(expected_value, v)
 
             # policy loss
             policy_loss = (-torch.max(torch.Tensor([-5]), torch.log(expected_policy.gather(1, place_action.view(-1, 1)))) * delta_V).mean()
@@ -157,11 +157,11 @@ class Optimizer(object):
             # policy entropy
             entropy_loss = (expected_policy * torch.max(torch.Tensor([-5]), torch.log(expected_policy))).mean()
 
-            print("p", proposed_loss * self.proposed_weight)
-            print("pnz", proposed_non_zero_loss * self.proposed_non_zero_weight)
-            print("c", critic_loss * self.critic_weight)
-            print("pi", policy_loss * self.actor_weight)
-            print("ent", entropy_loss * self.entropy_weight)
+            # print("p", proposed_loss * self.proposed_weight)
+            # print("pnz", proposed_non_zero_loss * self.proposed_non_zero_weight)
+            # print("c", critic_loss * self.critic_weight)
+            # print("pi", policy_loss * self.actor_weight)
+            # print("ent", entropy_loss * self.entropy_weight)
             # add all the losses, and take a step
             total_loss = proposed_loss * self.proposed_weight
             total_loss += proposed_non_zero_loss * self.proposed_non_zero_weight
@@ -169,7 +169,7 @@ class Optimizer(object):
             total_loss += policy_loss * self.actor_weight
             total_loss += entropy_loss * self.entropy_weight
 
-            print("tot", total_loss)
+            # print("tot", total_loss)
             total_loss.backward()
             self.optimizer.step()
 
@@ -182,21 +182,13 @@ class Optimizer(object):
 
             if step % 10 == 0:
                 print("n experiences: {n}, steps: {s}, loss: {l}".format(n=n_experiences, s=step, l=total_loss))
-                torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
-                torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
-                torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
-                torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
-                self.MEN = MarketEncoder()
-                self.PN = Proposer()
-                self.ACN = ActorCritic()
-                self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
-                                            [params for params in self.PN.parameters()] +
-                                            [params for params in self.ACN.parameters()],
-                                            weight_decay=self.weight_penalty)
-                self.MEN.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
-                self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
-                self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
-                self.optimizer.load_state_dict(torch.load(self.models_loc + "/optimizer.pt"))
+                try:
+                    torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
+                    torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
+                    torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
+                    torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
+                except Exception:
+                    print("failed to save")
 
             for i, experience in enumerate(self.queued_experience):
                 if len(self.prioritized_experience) == self.prioritized_batch_size:

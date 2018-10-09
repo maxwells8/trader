@@ -67,8 +67,11 @@ class Worker(object):
             policy, value = self.actor_critic.forward(market_encoding, queried_actions)
 
             if self.test:
+                print("step:", i_step)
+                print("turn:", i_step % self.window)
                 print("queried_actions:", queried_actions)
                 print("(policy, value):", policy, value)
+                print("rewards:", np.sum(rewards))
 
             action = int(torch.multinomial(policy, 1))
             mu = policy[0, action]
@@ -87,6 +90,7 @@ class Worker(object):
                 break
 
             final_time_states, final_percent_in, reward = state
+            reward *= 1000
             final_time_states = torch.cat(final_time_states).cpu()
             mean = final_time_states[:, 0, :4].mean()
             std = final_time_states[:, 0, :4].std()
@@ -124,6 +128,7 @@ class Worker(object):
                     except Exception:
                         pass
                 self.environment.reset()
+                rewards = []
                 state = self.environment.get_state()
                 if not state:
                     break
