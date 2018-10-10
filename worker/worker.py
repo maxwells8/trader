@@ -23,9 +23,9 @@ time, and it also prepares the experience for the optimizer.
 """
 class Worker(object):
 
-    def __init__(self, source, name, models_loc, window, n_steps, test=False):
+    def __init__(self, source, name, models_loc, window, start, n_steps, test=False):
 
-        self.environment = Env(source, time_window=window)
+        self.environment = Env(source, start, n_steps, time_window=window)
         self.market_encoder = MarketEncoder()
         self.proposer = Proposer()
         self.actor_critic = ActorCritic()
@@ -127,17 +127,17 @@ class Worker(object):
                         break
                     except Exception:
                         pass
-                self.environment.reset()
-                rewards = []
-                state = self.environment.get_state()
-                if not state:
-                    break
-                initial_time_states, initial_percent_in, _ = state
-                initial_time_states = torch.cat(initial_time_states).cpu()
-                mean = initial_time_states[:, 0, :4].mean()
-                std = initial_time_states[:, 0, :4].std()
-                initial_time_states[:, 0, :4] = (initial_time_states[:, 0, :4] - mean) / std
-                initial_time_states[:, 0, 5] = initial_time_states[:, 0, 5] / std
+                # self.environment.reset()
+                # rewards = []
+                # state = self.environment.get_state()
+                # if not state:
+                #     break
+                # initial_time_states, initial_percent_in, _ = state
+                # initial_time_states = torch.cat(initial_time_states).cpu()
+                # mean = initial_time_states[:, 0, :4].mean()
+                # std = initial_time_states[:, 0, :4].std()
+                # initial_time_states[:, 0, :4] = (initial_time_states[:, 0, :4] - mean) / std
+                # initial_time_states[:, 0, 5] = initial_time_states[:, 0, 5] / std
 
 
 Experience = namedtuple('Experience', ('initial_time_states',
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     models_loc = '../models'
     window = 256
-    n_steps = 1000000
+    n_steps = 256 + 512
 
-    worker = Worker(source, "4", models_loc, window, n_steps, True)
+    worker = Worker(source, "4", models_loc, window, 100000, n_steps, True)
     worker.run()

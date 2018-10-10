@@ -11,11 +11,13 @@ it, not just at the very beginning of the tick.
 """
 class Env(object):
 
-    def __init__(self, source, spread_func=None, time_window=256):
-        self.data = pd.DataFrame(pd.read_csv(source))
+    def __init__(self, source, start, n_steps, spread_func=None, time_window=256):
+        self.data = pd.DataFrame(pd.read_csv(source)).iloc[start:start+n_steps]
 
         self.time_window = time_window
-        self.cur_i = 0
+        self.cur_i = start
+        self.start = start
+        self.n_steps = n_steps
 
         self.time_states = []
         self.orders = []
@@ -38,7 +40,7 @@ class Env(object):
     def get_state(self):
         # print(str(self.balance) + "\t" + str(self.value))
 
-        if self.cur_i == self.data.shape[0]:
+        if self.cur_i == self.start + self.n_steps:
             return False
 
         torch_time_states = []
@@ -48,6 +50,9 @@ class Env(object):
         return torch_time_states, (self.value - self.balance) / self.value, self.reward()
 
     def step(self, placed_order):
+
+        if self.cur_i == self.start + self.n_steps - 1:
+            return False
 
         # buy or sell as necessary
         if placed_order[0] == 0:
@@ -68,9 +73,6 @@ class Env(object):
             self.sell(placed_order[1] * self.balance)
 
         self.cur_i += 1
-
-        if self.cur_i == self.data.shape[0]:
-            return False
 
         if len(self.time_states) == self.time_window:
             del self.time_states[0]
@@ -198,8 +200,10 @@ class TimeState(object):
         return self.tensor_repr
 
 if __name__ == "__main__":
-    env = Env("C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv")
-    while True:
+    start = 100000
+    n_steps = 8
+    env = Env("C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv", start, n_steps)
+    for _ in range(n_steps):
         print(env.get_state())
         print(env.value)
         action = int(input("action: "))
