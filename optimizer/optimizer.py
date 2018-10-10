@@ -26,9 +26,9 @@ class Optimizer(object):
     def __init__(self, models_loc):
         self.models_loc = models_loc
         # networks
-        self.MEN = MarketEncoder()
-        self.PN = Proposer()
-        self.ACN = ActorCritic()
+        self.MEN = MarketEncoder().cuda()
+        self.PN = Proposer().cuda()
+        self.ACN = ActorCritic().cuda()
         try:
             self.MEN.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
             self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
@@ -57,11 +57,11 @@ class Optimizer(object):
 
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
+        self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
         self.tau = float(self.server.get("optimizer_tau").decode("utf-8"))
         self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
 
         self.proposed_weight = float(self.server.get("optimizer_proposed_weight").decode("utf-8"))
-        self.proposed_non_zero_weight = float(self.server.get("optimizer_proposed_non_zero_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
@@ -134,9 +134,6 @@ class Optimizer(object):
             _, target_value = self.ACN_.forward(initial_market_encoding_, proposed_actions)
             proposed_loss = -target_value.mean()
 
-            # proposed entropy loss
-            proposed_non_zero_loss = torch.abs(proposed_actions).mean()
-
             # critic loss
             expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
             this_step_policy, this_step_value = self.ACN_.forward(initial_market_encoding_, proposed)
@@ -146,30 +143,23 @@ class Optimizer(object):
             next_step_policy, next_step_value = self.ACN_.forward(final_market_encoding, next_step_proposed)
             next_step_policy = next_step_policy.detach()
             next_step_value = next_step_value.detach()
-            delta_V = torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * self.gamma) - this_step_value)
+            delta_V = (torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * (self.gamma**(self.trajectory_steps+1))) - this_step_value)).detach()
+
             v = this_step_value + delta_V
 
             critic_loss = F.l1_loss(expected_value, v)
 
             # policy loss
-            policy_loss = (-torch.max(torch.Tensor([-5]), torch.log(expected_policy.gather(1, place_action.view(-1, 1)))) * delta_V).mean()
+            policy_loss = (-torch.max(torch.Tensor([-10]), torch.log(expected_policy.gather(1, place_action.view(-1, 1)))) * delta_V).mean()
 
             # policy entropy
-            entropy_loss = (expected_policy * torch.max(torch.Tensor([-5]), torch.log(expected_policy))).mean()
+            entropy_loss = (expected_policy * torch.max(torch.Tensor([-10]), torch.log(expected_policy))).mean()
 
-            # print("p", proposed_loss * self.proposed_weight)
-            # print("pnz", proposed_non_zero_loss * self.proposed_non_zero_weight)
-            # print("c", critic_loss * self.critic_weight)
-            # print("pi", policy_loss * self.actor_weight)
-            # print("ent", entropy_loss * self.entropy_weight)
-            # add all the losses, and take a step
             total_loss = proposed_loss * self.proposed_weight
-            total_loss += proposed_non_zero_loss * self.proposed_non_zero_weight
             total_loss += critic_loss * self.critic_weight
             total_loss += policy_loss * self.actor_weight
             total_loss += entropy_loss * self.entropy_weight
 
-            # print("tot", total_loss)
             total_loss.backward()
             self.optimizer.step()
 

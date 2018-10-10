@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 torch.manual_seed(0)
-D_BAR = 6
+D_BAR = 5
 D_MODEL = 256
 N_LSTM_LAYERS = 2
 # torch.cuda.manual_seed(0)
@@ -78,18 +78,19 @@ class ActorCritic(nn.Module):
         self.fc1 = nn.Linear(D_MODEL + self.d_action + 1, D_MODEL)
 
         self.actor1 = nn.Linear(D_MODEL, D_MODEL)
-        self.actor2 = nn.Linear(D_MODEL, 3)
+        self.actor2 = nn.Linear(D_MODEL, 4)
 
         self.critic1 = nn.Linear(D_MODEL, D_MODEL)
         self.critic2 = nn.Linear(D_MODEL, 1)
 
-    def forward(self, market_encoding, proposed_actions):
+    def forward(self, market_encoding, proposed_actions, sigma=1):
 
         x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL + 1),
                                              proposed_actions.view(-1, self.d_action)], 1)))
 
         policy = F.leaky_relu(self.actor1(x)) + x
-        policy = F.softmax(self.actor2(policy), dim=1)
+        policy = self.actor2(policy) * sigma
+        policy = F.softmax(policy, dim=1)
 
         critic = F.leaky_relu(self.critic1(x)) + x
         critic = self.critic2(critic)

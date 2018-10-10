@@ -32,7 +32,6 @@ class Env(object):
                                      high=self.data['high'][self.cur_i],
                                      low=self.data['low'][self.cur_i],
                                      close=self.data['close'][self.cur_i],
-                                     time=self.data['time'][self.cur_i],
                                      spread=self.spread_func())
 
         self.time_states.append(first_time_state)
@@ -47,7 +46,11 @@ class Env(object):
         for time_state in self.time_states:
             torch_time_states.append(time_state.as_tensor())
 
-        return torch_time_states, (self.value - self.balance) / self.value, self.reward()
+        if len(self.orders) > 0 and self.orders[-1].buy:
+            coef = 1
+        else:
+            coef = -1
+        return torch_time_states, coef*(self.value - self.balance) / self.value, self.reward()
 
     def step(self, placed_order):
 
@@ -60,7 +63,7 @@ class Env(object):
             # if a buy order, but have already placed sell orders, close all
             # before buying
             if len(self.orders) > 0 and not self.orders[0].buy:
-                for i, order_ in enumerate(self.orders):
+                for i, _ in enumerate(self.orders):
                     self.close_order(i)
             self.buy(placed_order[1] * self.balance)
         elif placed_order[0] == 1:
@@ -68,9 +71,15 @@ class Env(object):
             # if a sell order, but have already placed buy orders, close all
             # before selling
             if len(self.orders) > 0 and self.orders[0].buy:
-                for i, order_ in enumerate(self.orders):
+                for i, _ in enumerate(self.orders):
                     self.close_order(i)
             self.sell(placed_order[1] * self.balance)
+
+        elif placed_order[0] == 2:
+            # close all open orders
+            if len(self.orders) > 0:
+                for i, _ in enumerate(self.orders):
+                    self.close_order(i)
 
         self.cur_i += 1
 
@@ -83,7 +92,6 @@ class Env(object):
                                    high=self.data['high'][self.cur_i],
                                    low=self.data['low'][self.cur_i],
                                    close=self.data['close'][self.cur_i],
-                                   time=self.data['time'][self.cur_i],
                                    spread=self.spread_func())
 
         self.time_states.append(new_time_state)
@@ -160,15 +168,16 @@ class Order(object):
         else:
             return -close_price * self.quantity
 
+    def __repr__(self):
+        return "order of quantity: {quant} at price: {price}".format(quant=self.quantity, price=self.open_price)
 
 class TimeState(object):
 
-    def __init__(self, open, high, low, close, time, spread):
+    def __init__(self, open, high, low, close, spread):
         self.open = open
         self.high = high
         self.low = low
         self.close = close
-        self.time = time
         self.spread = spread
         self.nd_repr = None
         self.tensor_repr = None
@@ -181,7 +190,6 @@ class TimeState(object):
                                      self.high,
                                      self.low,
                                      self.close,
-                                     self.time,
                                      self.spread])
 
         return self.nd_repr
@@ -194,7 +202,6 @@ class TimeState(object):
                                              self.high,
                                              self.low,
                                              self.close,
-                                             self.time,
                                              self.spread]).float().view(1, 1, -1)
 
         return self.tensor_repr
@@ -207,7 +214,7 @@ if __name__ == "__main__":
         print(env.get_state())
         print(env.value)
         action = int(input("action: "))
-        if action != 2:
+        if action in [0, 1]:
             quantity = float(input("quantity: "))
             env.step([action, quantity])
         else:
