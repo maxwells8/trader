@@ -2,14 +2,13 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="8d9e1410-683b-4bae-b392-9c0fa1ba01d1" name="Default" comment="idk">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/actor_critic.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/actor_critic.pt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/market_encoder.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/market_encoder.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/optimizer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/optimizer.pt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/proposer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/proposer.pt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/normalize_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/normalize_data.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/optimizer/optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/optimizer/optimizer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/start_optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_optimizer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/start_worker.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_worker.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/start_workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_workers.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/worker/worker.py" beforeDir="false" afterPath="$PROJECT_DIR$/worker/worker.py" afterDir="false" />
     </list>
     <ignored path="$PROJECT_DIR$/out/" />
@@ -31,14 +30,14 @@
     <session id="-108150106">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="27" />
+          <entry key="project.closed" value="28" />
           <entry key="project.open.time.0" value="1" />
           <entry key="project.open.time.1" value="1" />
           <entry key="project.open.time.3" value="1" />
           <entry key="project.open.time.4" value="20" />
-          <entry key="project.open.time.5" value="8" />
+          <entry key="project.open.time.5" value="9" />
           <entry key="project.open.time.6" value="2" />
-          <entry key="project.opened" value="33" />
+          <entry key="project.opened" value="34" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.edit">
@@ -78,11 +77,11 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/worker/worker.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="265">
-              <caret line="60" column="5" selection-start-line="60" selection-start-column="5" selection-end-line="60" selection-end-column="5" />
+            <state relative-caret-position="554">
+              <caret line="77" column="5" selection-start-line="77" selection-start-column="5" selection-end-line="77" selection-end-column="5" />
               <folding>
                 <element signature="e#0#12#0" expanded="true" />
               </folding>
@@ -90,10 +89,19 @@
           </provider>
         </entry>
       </file>
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state>
+              <caret column="12553" selection-start-column="12553" selection-end-column="12553" />
+            </state>
+          </provider>
+        </entry>
+      </file>
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/networks.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="391">
+            <state relative-caret-position="612">
               <caret line="41" selection-start-line="41" selection-end-line="41" />
               <folding>
                 <element signature="e#0#12#0" expanded="true" />
@@ -151,8 +159,6 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
-      <pane id="Scope" />
-      <pane id="AndroidView" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -168,6 +174,11 @@
             <path>
               <item name="trader" type="b2602c69:ProjectViewProjectNode" />
               <item name="trader" type="462c0819:PsiDirectoryNode" />
+              <item name="optimizer" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="trader" type="b2602c69:ProjectViewProjectNode" />
+              <item name="trader" type="462c0819:PsiDirectoryNode" />
               <item name="worker" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
@@ -175,6 +186,8 @@
         </subPane>
       </pane>
       <pane id="PackagesPane" />
+      <pane id="Scope" />
+      <pane id="AndroidView" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -429,6 +442,7 @@
       <workItem from="1539031890534" duration="2378000" />
       <workItem from="1539045262612" duration="1408000" />
       <workItem from="1539058128766" duration="1961000" />
+      <workItem from="1539280476614" duration="9000" />
     </task>
     <task id="LOCAL-00001" summary="networks, environment, normalization done-ish, working on worker / optimizer">
       <created>1534555995097</created>
@@ -483,12 +497,12 @@
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="170242000" />
+    <option name="totallyTimeSpent" value="170251000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="1936" height="1056" extended-state="6" />
     <layout>
-      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.37866667" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.38293332" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Image Layers" order="2" />
       <window_info id="Designer" order="3" />
@@ -566,7 +580,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/worker/worker.py</url>
-          <line>60</line>
+          <line>77</line>
           <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
@@ -599,9 +613,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="1275">
           <caret line="78" selection-start-line="78" selection-end-line="78" />
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -668,16 +679,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/networks.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="391">
-          <caret line="41" selection-start-line="41" selection-end-line="41" />
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$USER_HOME$/Anaconda3/Lib/site-packages/torch/nn/modules/module.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="168">
@@ -687,11 +688,28 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/worker/worker.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="265">
-          <caret line="60" column="5" selection-start-line="60" selection-start-column="5" selection-end-line="60" selection-end-column="5" />
+        <state relative-caret-position="554">
+          <caret line="77" column="5" selection-start-line="77" selection-start-column="5" selection-end-line="77" selection-end-column="5" />
           <folding>
             <element signature="e#0#12#0" expanded="true" />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/networks.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="612">
+          <caret line="41" selection-start-line="41" selection-end-line="41" />
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state>
+          <caret column="12553" selection-start-column="12553" selection-end-column="12553" />
         </state>
       </provider>
     </entry>

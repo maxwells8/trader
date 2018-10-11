@@ -126,8 +126,7 @@ class Worker(object):
             all_rewards.append(reward)
 
             if i_step >= self.trajectory_steps + self.window - 1:
-                discounted_reward = np.sum(np.array(rewards) * (self.gamma ** np.arange(self.trajectory_steps)))
-                experience = Experience(time_states[0], percents_in[0], mus[0], proposed_actions[0], actions[0], discounted_reward, final_time_states, final_percent_in)
+                experience = Experience(time_states + [final_time_states], percents_in + [final_percent_in], mus, proposed_actions, actions, rewards)
                 if not self.test:
                     self.server.rpush("experience", pickle.dumps(experience, protocol=pickle.HIGHEST_PROTOCOL))
 
@@ -145,14 +144,12 @@ class Worker(object):
         print("name: {name}, steps: {steps}, time: {time}, sum all rewards = {reward}".format(name=self.name, steps=i_step, time=time.time()-t0, reward=np.sum(all_rewards)))
 
 
-Experience = namedtuple('Experience', ('initial_time_states',
-                                       'initial_percent_in',
-                                       'mu',
+Experience = namedtuple('Experience', ('time_states',
+                                       'percents_in',
+                                       'mus',
                                        'proposed_actions',
-                                       'place_action',
-                                       'reward',
-                                       'final_time_states',
-                                       'final_percent_in'))
+                                       'place_actions',
+                                       'rewards'))
 
 if __name__ == "__main__":
     server = redis.Redis("localhost")
