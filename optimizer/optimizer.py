@@ -93,7 +93,7 @@ class Optimizer(object):
                     experience = pickle.loads(experience)
                     self.queued_experience.append(experience)
                     n_experiences += 1
-                elif step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size) or len(self.queued_experience) + len(self.prioritized_experience) > 0:
+                elif (step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) + len(self.prioritized_experience) > 0:
                     break
                 else:
                     experience = self.server.blpop("experience")[1]
@@ -125,24 +125,27 @@ class Optimizer(object):
             policy = initial_policy.clone()
             value = initial_value.clone()
             v_trace = value
+            r = torch.Tensor(reward[0]).view(-1, 1)
             for i in range(self.trajectory_steps - 1):
+                r += (self.gamma ** i) * torch.Tensor(reward[i+1]).view(-1, 1)
                 market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), 'cuda')
                 proposed = self.PN.forward(market_encoding)
                 next_policy, next_value = self.ACN(market_encoding, proposed)
                 delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
                 delta_V *= (torch.Tensor(reward[i]).view(-1, 1) + self.gamma * next_value - value)
                 v_trace += c * (self.gamma ** i) * delta_V.detach()
-                if i == 0:
-                    second_delta_V = delta_V.clone()
 
-                c *= torch.Tensor(mu[i]).view(-1, 1)
+                if i == 0:
+                    first_delta_V = delta_V.clone()
+
+                c *= torch.min(self.max_c, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
                 value = next_value.clone()
                 policy = next_policy.clone()
 
-            critic_loss = F.mse_loss(initial_value, v_trace)
+            critic_loss = F.l1_loss(initial_value, v_trace)
             actor_loss = -torch.max(torch.Tensor([-10]), torch.log(initial_policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))))
             actor_loss *= torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))/torch.Tensor(mu[0]).view(-1, 1))
-            actor_loss *= second_delta_V
+            actor_loss *= first_delta_V.detach()
             actor_loss = actor_loss.mean()
             entropy_loss = (initial_policy * torch.max(torch.Tensor([-10]), torch.log(initial_policy))).mean()
 
@@ -206,11 +209,11 @@ class Optimizer(object):
                     print("failed to save")
 
             for i, experience in enumerate(self.queued_experience):
-                if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0:
-                    smallest, i_smallest = torch.min(torch.abs(delta_V[len(self.queued_experience):]), dim=0)
-                    if torch.abs(delta_V[i]) > smallest:
+                if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):
+                    smallest, i_smallest = torch.min(torch.abs((initial_value - v_trace)[len(self.queued_experience):]), dim=0)
+                    if torch.abs((initial_value - v_trace)[i]) > smallest:
                         self.prioritized_experience[i_smallest] = experience
-                        delta_V[len(self.queued_experience) + i_smallest] = torch.abs(delta_V[i])
+                        (initial_value - v_trace)[len(self.queued_experience) + i_smallest] = torch.abs((initial_value - v_trace)[i])
                 elif self.prioritized_batch_size != 0:
                     self.prioritized_experience.append(experience)
 

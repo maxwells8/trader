@@ -145,7 +145,7 @@ class Env(object):
             self.orders.pop()
 
     def default_spread_func():
-        return np.random.gamma(3, 2 / 10000)
+        return np.random.gamma(1.5, 2 / 10000)
 
 
 class Order(object):

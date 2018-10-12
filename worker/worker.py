@@ -53,7 +53,6 @@ class Worker(object):
         self.n_steps = n_steps
 
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
-        self.gamma = float(self.server.get("gamma").decode("utf-8"))
 
         self.test = test
 
@@ -77,37 +76,43 @@ class Worker(object):
         t0 = time.time()
         for i_step in range(self.n_steps):
 
-            time_states.append(initial_time_states)
-            percents_in.append(initial_percent_in)
-
-            market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), 'cpu')
-
-            queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma)
-            proposed_actions.append(queried_actions)
-
-            policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
-
-            if self.test:
-                print("step:", i_step)
-                print("queried_actions:", queried_actions)
-                print("(policy, value):", policy, value)
-                print("rewards:", np.sum(all_rewards))
-
-            action = int(torch.multinomial(policy, 1))
-            mu = policy[0, action]
-            actions.append(action)
-            mus.append(mu)
-
-            if action == 0:
-                placed_order = [0, float(queried_actions[0, 0])]
-            elif action == 1:
-                placed_order = [1, float(queried_actions[0, 1])]
-            else:
-                placed_order = [action]
-
             if i_step >= self.window:
+                time_states.append(initial_time_states)
+                percents_in.append(initial_percent_in)
+
+                market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), 'cpu')
+
+                queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma)
+                proposed_actions.append(queried_actions)
+
+                policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
+
+                if self.test:
+                    print("step:", i_step)
+                    print("queried_actions:", queried_actions)
+                    print("(policy, value):", policy, value)
+                    print("rewards:", np.sum(all_rewards))
+
+                action = int(torch.multinomial(policy, 1))
+                mu = policy[0, action]
+                actions.append(action)
+                mus.append(mu)
+
+                if action == 0:
+                    placed_order = [0, float(queried_actions[0, 0])]
+                elif action == 1:
+                    placed_order = [1, float(queried_actions[0, 1])]
+                else:
+                    placed_order = [action]
+
                 self.environment.step(placed_order)
+
             else:
+                time_states.append(None)
+                percents_in.append(None)
+                proposed_actions.append(None)
+                actions.append(None)
+                mus.append(None)
                 self.environment.step([3])
 
             state = self.environment.get_state()
