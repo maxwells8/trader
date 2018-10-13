@@ -48,24 +48,24 @@ class Optimizer(object):
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
-        self.tau = float(self.server.get("optimizer_tau").decode("utf-8"))
-        self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
-        self.max_c = torch.Tensor([float(self.server.get("optimizer_max_c").decode("utf-8"))], device='cuda')
+        self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))], device='cuda')
+        self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))], device='cuda')
 
         self.proposer_tau = float(self.server.get("proposer_tau").decode("utf-8"))
         self.critic_tau = float(self.server.get("critic_tau").decode("utf-8"))
         self.actor_tau = float(self.server.get("actor_tau").decode("utf-8"))
         self.entropy_tau = float(self.server.get("entropy_tau").decode("utf-8"))
 
-        self.proposed_weight = float(self.server.get("optimizer_proposed_weight").decode("utf-8"))
-        self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
-        self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
-        self.entropy_weight = float(self.server.get("optimizer_entropy_weight").decode("utf-8"))
-        self.weight_penalty = float(self.server.get("optimizer_weight_penalty").decode("utf-8"))
-        self.learning_rate = float(self.server.get("optimizer_learning_rate").decode("utf-8"))
+        self.proposed_weight = float(self.server.get("proposed_weight").decode("utf-8"))
+        self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
+        self.actor_weight = float(self.server.get("actor_weight").decode("utf-8"))
+        self.entropy_weight = float(self.server.get("entropy_weight").decode("utf-8"))
+        self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
 
-        self.queued_batch_size = int(self.server.get("optimizer_queued_batch_size").decode("utf-8"))
-        self.prioritized_batch_size = int(self.server.get("optimizer_prioritized_batch_size").decode("utf-8"))
+        self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
+
+        self.queued_batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
+        self.prioritized_batch_size = int(self.server.get("prioritized_batch_size").decode("utf-8"))
 
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
@@ -182,10 +182,10 @@ class Optimizer(object):
                 self.server.set("actor_ema", normalized_actor_loss)
                 self.server.set("entropy_ema", normalized_entropy_loss)
 
-            total_loss = (proposed_loss / normalized_proposed_loss) * self.proposed_weight
-            total_loss += (critic_loss / normalized_critic_loss) * self.critic_weight
-            total_loss += (actor_loss / normalized_actor_loss) * self.actor_weight
-            total_loss += (entropy_loss / normalized_entropy_loss) * self.entropy_weight
+            total_loss = (proposed_loss / abs(normalized_proposed_loss) + 1e-9) * self.proposed_weight
+            total_loss += (critic_loss / abs(normalized_critic_loss) + 1e-9) * self.critic_weight
+            total_loss += (actor_loss / abs(normalized_actor_loss) + 1e-9) * self.actor_weight
+            total_loss += (entropy_loss / abs(normalized_entropy_loss) + 1e-9) * self.entropy_weight
             total_loss.backward()
             self.optimizer.step()
 
@@ -197,7 +197,15 @@ class Optimizer(object):
             prev_reward_emsd = reward_emsd
 
             if step % 10 == 0:
-                print("n experiences: {n}, steps: {s}, loss: {l}".format(n=n_experiences, s=step, l=total_loss))
+                print("n experiences: {n}, steps: {s}".format(n=n_experiences, s=step))
+                print("weighted normalized losses: \n\tproposed: {p} \
+                                                   \n\tcritic: {c} \
+                                                   \n\tactor: {a} \
+                                                   \n\tentropy: {e}\n".format(p=(proposed_loss / abs(normalized_proposed_loss) + 1e-9) * self.proposed_weight,
+                                                                              c=(critic_loss / abs(normalized_critic_loss) + 1e-9) * self.critic_weight,
+                                                                              a=(actor_loss / abs(normalized_actor_loss) + 1e-9) * self.actor_weight,
+                                                                              e=(entropy_loss / abs(normalized_entropy_loss) + 1e-9) * self.entropy_weight))
+
                 try:
                     torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
                     torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
