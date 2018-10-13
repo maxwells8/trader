@@ -52,6 +52,11 @@ class Optimizer(object):
         self.max_rho = torch.Tensor([float(self.server.get("optimizer_max_rho").decode("utf-8"))], device='cuda')
         self.max_c = torch.Tensor([float(self.server.get("optimizer_max_c").decode("utf-8"))], device='cuda')
 
+        self.proposer_tau = float(self.server.get("proposer_tau").decode("utf-8"))
+        self.critic_tau = float(self.server.get("critic_tau").decode("utf-8"))
+        self.actor_tau = float(self.server.get("actor_tau").decode("utf-8"))
+        self.entropy_tau = float(self.server.get("entropy_tau").decode("utf-8"))
+
         self.proposed_weight = float(self.server.get("optimizer_proposed_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("optimizer_critic_weight").decode("utf-8"))
         self.actor_weight = float(self.server.get("optimizer_actor_weight").decode("utf-8"))
@@ -154,51 +159,33 @@ class Optimizer(object):
             actor_loss = actor_loss.mean()
             entropy_loss = (initial_policy * torch.max(torch.Tensor([-10]), torch.log(initial_policy))).mean()
 
-            # initial_time_states = torch.cat(batch.initial_time_states, dim=1).detach().cuda()
-            # initial_percent_in = torch.Tensor(batch.initial_percent_in).resize(len(experiences), 1).cuda()
-            # mu = torch.Tensor(batch.mu).resize(len(experiences), 1).cuda()
-            # proposed = torch.cat(batch.proposed_actions).resize(len(experiences), 2).detach().cuda()
-            # place_action = torch.Tensor(batch.place_action).long().resize(len(experiences), 1).cuda()
-            # reward = torch.Tensor(batch.reward).resize(len(experiences), 1).cuda()
-            # final_time_states = torch.cat(batch.final_time_states, dim=1).detach().cuda()
-            # final_percent_in = torch.Tensor(batch.final_percent_in).resize(len(experiences), 1).cuda()
+            normalized_proposed_loss = self.server.get("proposer_ema").decode("utf-8")
+            normalized_critic_loss = self.server.get("critic_ema").decode("utf-8")
+            normalized_actor_loss = self.server.get("actor_ema").decode("utf-8")
+            normalized_entropy_loss = self.server.get("entropy_ema").decode("utf-8")
+            if normalized_proposed_loss == 'None':
+                normalized_proposed_loss = float(proposed_loss)
+                normalized_critic_loss = float(critic_loss)
+                normalized_actor_loss = float(actor_loss)
+                normalized_entropy_loss = float(entropy_loss)
+                self.server.set("proposer_ema", normalized_proposed_loss)
+                self.server.set("critic_ema", normalized_critic_loss)
+                self.server.set("actor_ema", normalized_actor_loss)
+                self.server.set("entropy_ema", normalized_entropy_loss)
+            else:
+                normalized_proposed_loss = float(self.proposer_tau * proposed_loss + (1 - self.proposer_tau) * float(normalized_proposed_loss))
+                normalized_critic_loss = float(self.critic_tau * critic_loss + (1 - self.critic_tau) * float(normalized_critic_loss))
+                normalized_actor_loss = float(self.actor_tau * actor_loss + (1 - self.actor_tau) * float(normalized_actor_loss))
+                normalized_entropy_loss = float(self.entropy_tau * entropy_loss + (1 - self.entropy_tau) * float(normalized_entropy_loss))
+                self.server.set("proposer_ema", normalized_proposed_loss)
+                self.server.set("critic_ema", normalized_critic_loss)
+                self.server.set("actor_ema", normalized_actor_loss)
+                self.server.set("entropy_ema", normalized_entropy_loss)
 
-            # calculate the market_encoding
-            # initial_market_encoding = self.MEN.forward(initial_time_states, initial_percent_in, 'cuda')
-            # initial_market_encoding_ = self.MEN_.forward(initial_time_states, initial_percent_in, 'cuda').detach()
-            # final_market_encoding = self.MEN_.forward(final_time_states, final_percent_in, 'cuda')
-            #
-            # # proposed loss
-            # proposed_actions = self.PN.forward(initial_market_encoding)
-            # _, target_value = self.ACN_.forward(initial_market_encoding_, proposed_actions)
-            # proposed_loss = -target_value.mean()
-            #
-            # # critic loss
-            # expected_policy, expected_value = self.ACN.forward(initial_market_encoding, proposed)
-            # this_step_policy, this_step_value = self.ACN_.forward(initial_market_encoding_, proposed)
-            # this_step_policy = this_step_policy.detach()
-            # this_step_value = this_step_value.detach()
-            # next_step_proposed = self.PN_.forward(final_market_encoding).detach()
-            # next_step_policy, next_step_value = self.ACN_.forward(final_market_encoding, next_step_proposed)
-            # next_step_policy = next_step_policy.detach()
-            # next_step_value = next_step_value.detach()
-            # delta_V = (torch.min(self.max_rho, this_step_policy.gather(1, place_action.view(-1, 1))/mu)*(reward + (next_step_value * (self.gamma**(self.trajectory_steps+1))) - this_step_value)).detach()
-            #
-            # v = this_step_value + delta_V
-            #
-            # critic_loss = F.l1_loss(expected_value, v)
-            #
-            # # policy loss
-            # policy_loss = (-torch.max(torch.Tensor([-10]), torch.log(expected_policy.gather(1, place_action.view(-1, 1)))) * delta_V).mean()
-            #
-            # # policy entropy
-            # entropy_loss = (expected_policy * torch.max(torch.Tensor([-10]), torch.log(expected_policy))).mean()
-
-            total_loss = proposed_loss * self.proposed_weight
-            total_loss += critic_loss * self.critic_weight
-            total_loss += actor_loss * self.actor_weight
-            total_loss += entropy_loss * self.entropy_weight
-
+            total_loss = (proposed_loss / normalized_proposed_loss) * self.proposed_weight
+            total_loss += (critic_loss / normalized_critic_loss) * self.critic_weight
+            total_loss += (actor_loss / normalized_actor_loss) * self.actor_weight
+            total_loss += (entropy_loss / normalized_entropy_loss) * self.entropy_weight
             total_loss.backward()
             self.optimizer.step()
 

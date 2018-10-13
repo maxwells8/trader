@@ -25,7 +25,7 @@ if __name__ == "__main__":
     policy_sigmas = [0.99, 0.95, 0.5, 0.1]
     models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
     window = 256
-    n_steps = window + 256
+    n_steps = window + 128
     server = redis.Redis("localhost")
 
     server.set("reward_ema", None)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 process.join()
-                if server.llen("experience") < 64:
+                if server.llen("experience") < 128:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i]))
                     processes[i] = start_process(str(i))
                     started = True
