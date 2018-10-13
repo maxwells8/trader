@@ -83,6 +83,8 @@ class Optimizer(object):
 
     def run(self):
 
+        prev_reward_ema = None
+        prev_reward_emsd = None
         n_experiences = 0
         step = 1
         while True:
@@ -116,6 +118,9 @@ class Optimizer(object):
             place_action = [*zip(*batch.place_actions)]
             reward = [*zip(*batch.rewards)]
 
+            reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
+            reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
+
             c = 1
             market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), 'cuda')
             proposed = self.PN.forward(market_encoding)
@@ -125,14 +130,14 @@ class Optimizer(object):
             policy = initial_policy.clone()
             value = initial_value.clone()
             v_trace = value
-            r = torch.Tensor(reward[0]).view(-1, 1)
+            r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
             for i in range(self.trajectory_steps - 1):
-                r += (self.gamma ** i) * torch.Tensor(reward[i+1]).view(-1, 1)
+                r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
                 market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), 'cuda')
                 proposed = self.PN.forward(market_encoding)
                 next_policy, next_value = self.ACN(market_encoding, proposed)
                 delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
-                delta_V *= (torch.Tensor(reward[i]).view(-1, 1) + self.gamma * next_value - value)
+                delta_V *= ((torch.Tensor(reward[i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6) + self.gamma * next_value - value)
                 v_trace += c * (self.gamma ** i) * delta_V.detach()
 
                 if i == 0:
@@ -196,6 +201,13 @@ class Optimizer(object):
 
             total_loss.backward()
             self.optimizer.step()
+
+            if prev_reward_ema != None:
+                self.ACN.state_dict()['critic2.weight'] = self.ACN.state_dict()['critic2.weight'] * reward_emsd / (prev_reward_emsd + 1e-6)
+                self.ACN.state_dict()['critic2.bias'] = self.ACN.state_dict()['critic2.bias'] * ((reward_emsd + 1e-6) + reward_ema - prev_reward_ema) / (prev_reward_emsd + 1e-6)
+
+            prev_reward_ema = reward_ema
+            prev_reward_emsd = reward_emsd
 
             if step % 10 == 0:
                 print("n experiences: {n}, steps: {s}, loss: {l}".format(n=n_experiences, s=step, l=total_loss))

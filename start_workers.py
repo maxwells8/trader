@@ -21,14 +21,15 @@ if __name__ == "__main__":
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [0.01, 0.02]
-    policy_sigmas = [0.99, 0.9]
+    proposed_sigmas = [0.01, 0.01, 0.01, 0.01]
+    policy_sigmas = [0.99, 0.95, 0.5, 0.1]
     models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
     window = 256
-    n_steps = window + 128
+    n_steps = window + 256
     server = redis.Redis("localhost")
 
-    server.set("trajectory_steps", 32)
+    server.set("reward_ema", None)
+    server.set("reward_emsd", 0)
 
     global n_times
     n_times = 0
@@ -54,7 +55,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 process.join()
-                if server.llen("experience") < 256:
+                if server.llen("experience") < 64:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i]))
                     processes[i] = start_process(str(i))
                     started = True

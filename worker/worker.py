@@ -11,6 +11,7 @@ from networks import *
 from environment import *
 import redis
 import pickle
+import math
 
 np.random.seed(0)
 torch.manual_seed(0)
@@ -54,10 +55,12 @@ class Worker(object):
 
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
+        self.reward_tau = float(self.server.get("reward_tau").decode("utf-8"))
+
         self.test = test
 
     def run(self):
-        all_rewards = []
+        all_rewards = 0
 
         time_states = []
         percents_in = []
@@ -88,10 +91,13 @@ class Worker(object):
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
 
                 if self.test:
+                    reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
+                    reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
                     print("step:", i_step)
                     print("queried_actions:", queried_actions)
                     print("(policy, value):", policy, value)
-                    print("rewards:", np.sum(all_rewards))
+                    print("sum rewards:", all_rewards)
+                    print("normalized sum rewards:", (all_rewards - reward_ema) / reward_emsd)
 
                 action = int(torch.multinomial(policy, 1))
                 mu = policy[0, action]
@@ -120,7 +126,18 @@ class Worker(object):
                 break
 
             final_time_states, final_percent_in, reward = state
-            reward *= 1000
+            if not self.test:
+                reward_ema = self.server.get("reward_ema").decode("utf-8")
+                if reward_ema == 'None':
+                    self.server.set("reward_ema", reward)
+                    self.server.set("reward_emsd", 0)
+                else:
+                    reward_ema = float(reward_ema)
+                    reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
+                    delta = reward - reward_ema
+                    self.server.set("reward_ema", reward_ema + self.reward_tau * delta)
+                    self.server.set("reward_emsd", math.sqrt((1 - self.reward_tau) * (reward_emsd**2 + self.reward_tau * (delta**2))))
+
             final_time_states = torch.cat(final_time_states).cpu()
             mean = final_time_states[:, 0, :4].mean()
             std = final_time_states[:, 0, :4].std()
@@ -128,7 +145,7 @@ class Worker(object):
             final_time_states[:, 0, 4] = final_time_states[:, 0, 4] / std
 
             rewards.append(reward)
-            all_rewards.append(reward)
+            all_rewards += reward
 
             if i_step >= self.trajectory_steps + self.window - 1:
                 experience = Experience(time_states + [final_time_states], percents_in + [final_percent_in], mus, proposed_actions, actions, rewards)
@@ -167,4 +184,6 @@ if __name__ == "__main__":
     test = True
     np.random.seed(int(time.time()))
     worker = Worker(source, "test", models_loc, window, np.random.randint(0,200000), n_steps, test)
+    # print(worker.actor_critic.state_dict()['critic2.weight'])
+    # print(worker.actor_critic.state_dict()['critic2.bias'])
     worker.run()
