@@ -35,7 +35,7 @@ class Optimizer(object):
             self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
             self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
-        except Exception:
+        except FileNotFoundError:
             self.MEN = MarketEncoder().cuda()
             self.PN = Proposer().cuda()
             self.ACN = ActorCritic().cuda()
@@ -118,6 +118,7 @@ class Optimizer(object):
             batch = Experience(*zip(*experiences))
             time_states = [*zip(*batch.time_states)]
             percent_in = [*zip(*batch.percents_in)]
+            spread = [*zip(*batch.spreads)]
             mu = [*zip(*batch.mus)]
             proposed_actions = [*zip(*batch.proposed_actions)]
             place_action = [*zip(*batch.place_actions)]
@@ -127,7 +128,7 @@ class Optimizer(object):
             reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
 
             c = 1
-            market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), 'cuda')
+            market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
             proposed = self.PN.forward(market_encoding)
             initial_policy, initial_value = self.ACN(market_encoding, proposed)
             _, target_value = self.ACN_(market_encoding, torch.cat(proposed_actions[0]).cuda())
@@ -138,7 +139,7 @@ class Optimizer(object):
             r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
             for i in range(self.trajectory_steps - 1):
                 r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
-                market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), 'cuda')
+                market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
                 proposed = self.PN.forward(market_encoding)
                 next_policy, next_value = self.ACN(market_encoding, proposed)
                 delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))

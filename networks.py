@@ -6,9 +6,9 @@ import numpy as np
 import time
 
 torch.manual_seed(0)
-D_BAR = 5
-D_MODEL = 256
-N_LSTM_LAYERS = 2
+D_BAR = 4
+D_MODEL = 128
+N_LSTM_LAYERS = 1
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -31,14 +31,15 @@ class MarketEncoder(nn.Module):
         return (torch.zeros(N_LSTM_LAYERS, batch_size, D_MODEL, device=device),
                 torch.zeros(N_LSTM_LAYERS, batch_size, D_MODEL, device=device))
 
-    def forward(self, input_market_values, percent_in, device, reset_lstm=True):
+    def forward(self, input_market_values, percent_in, spread, device, reset_lstm=True):
         x = None
         if reset_lstm:
             self.hidden = self.init_hidden(input_market_values.size()[1], device)
 
         x = F.leaky_relu(self.fc1(input_market_values))
         x, self.hidden = self.lstm(x, self.hidden)
-        x = F.leaky_relu(torch.cat([x[-1].view(-1, D_MODEL), percent_in.view(-1, 1)], 1))
+        x = F.leaky_relu(x)
+        x = torch.cat([x[-1].view(-1, D_MODEL), percent_in.view(-1, 1), spread.view(-1, 1)], 1)
         return x
 
 
@@ -52,12 +53,12 @@ class Proposer(nn.Module):
     def __init__(self):
         super(Proposer, self).__init__()
 
-        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
+        self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
         self.fc2 = nn.Linear(D_MODEL, D_MODEL)
         self.fc3 = nn.Linear(D_MODEL, 2)
 
     def forward(self, market_encoding, exploration_parameter=0):
-        x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL + 1)))
+        x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL + 2)))
         x = F.leaky_relu(self.fc2(x)) + x
         x = F.sigmoid(self.fc3(x) + exploration_parameter)
         return x
@@ -75,7 +76,7 @@ class ActorCritic(nn.Module):
 
         self.d_action = 2
 
-        self.fc1 = nn.Linear(D_MODEL + self.d_action + 1, D_MODEL)
+        self.fc1 = nn.Linear(D_MODEL + self.d_action + 2, D_MODEL)
 
         self.actor1 = nn.Linear(D_MODEL, D_MODEL)
         self.actor2 = nn.Linear(D_MODEL, 4)
@@ -85,7 +86,7 @@ class ActorCritic(nn.Module):
 
     def forward(self, market_encoding, proposed_actions, sigma=1):
 
-        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL + 1),
+        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL + 2),
                                              proposed_actions.view(-1, self.d_action)], 1)))
 
         policy = F.leaky_relu(self.actor1(x)) + x
