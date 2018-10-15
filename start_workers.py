@@ -28,7 +28,7 @@ if __name__ == "__main__":
     spread_func_params = [0, 0, 0, 0, 0, 0, 0]
     models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
     window = 256
-    n_steps = window + 128
+    n_steps = window + 256
     server = redis.Redis("localhost")
 
     if server.get("reward_ema") == None:
@@ -39,9 +39,7 @@ if __name__ == "__main__":
     n_times = 0
     def start_process(name):
         i_source = random.randint(0, 7)
-        i_source = 0
         start = random.randint(0, source_lengths[i_source] - n_steps - 1)
-        start = 0
         process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, window, start, n_steps))
         process.start()
         global n_times
@@ -67,3 +65,4 @@ if __name__ == "__main__":
                     processes[i] = start_process(str(i))
                     started = True
                 time.sleep(1)
+            print("reward ema:", server.get("reward_ema").decode("utf-8"))

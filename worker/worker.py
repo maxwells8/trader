@@ -94,7 +94,6 @@ class Worker(object):
 
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
 
-
                 action = int(torch.multinomial(policy, 1))
                 mu = policy[0, action]
                 actions.append(action)
@@ -182,6 +181,7 @@ Experience = namedtuple('Experience', ('time_states',
                                        'rewards'))
 
 if __name__ == "__main__":
+    np.random.seed(int(time.time()))
     server = redis.Redis("localhost")
     server.set("proposed_sigma_test", 0)
     server.set("policy_sigma_test", 1)
@@ -190,10 +190,9 @@ if __name__ == "__main__":
     models_loc = '../models'
     window = 256
     start = np.random.randint(0,200000)
-    start = 0
+    # start = 0
     n_steps = 100000
-    n_steps = window + 128
+    # n_steps = window + 256
     test = True
-    np.random.seed(int(time.time()))
     worker = Worker(source, "test", models_loc, window, start, n_steps, test)
     worker.run()

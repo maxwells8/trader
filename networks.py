@@ -79,7 +79,12 @@ class ActorCritic(nn.Module):
         self.fc1 = nn.Linear(D_MODEL + self.d_action + 2, D_MODEL)
 
         self.actor1 = nn.Linear(D_MODEL, D_MODEL)
-        self.actor2 = nn.Linear(D_MODEL, 4)
+
+        # changing the structure of this so that it won't immediately learn to
+        # just not trade
+
+        # self.actor2 = nn.Linear(D_MODEL, 4)
+        self.actor2 = nn.Linear(D_MODEL, 2)
 
         self.critic1 = nn.Linear(D_MODEL, D_MODEL)
         self.critic2 = nn.Linear(D_MODEL, 1)

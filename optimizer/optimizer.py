@@ -183,10 +183,20 @@ class Optimizer(object):
                 self.server.set("actor_ema", normalized_actor_loss)
                 self.server.set("entropy_ema", normalized_entropy_loss)
 
-            total_loss = (proposed_loss / abs(normalized_proposed_loss) + 1e-9) * self.proposed_weight
-            total_loss += (critic_loss / abs(normalized_critic_loss) + 1e-9) * self.critic_weight
-            total_loss += (actor_loss / abs(normalized_actor_loss) + 1e-9) * self.actor_weight
-            total_loss += (entropy_loss / abs(normalized_entropy_loss) + 1e-9) * self.entropy_weight
+            # proposed_weight = min(10 * self.proposed_weight, max(-10 * self.proposed_weight, float(proposed_loss) * self.proposed_weight / (abs(normalized_proposed_loss) + 1e-9)))
+            # critic_weight = min(10 * self.critic_weight, max(-10 * self.critic_weight, float(critic_loss) * self.critic_weight / (abs(normalized_critic_loss) + 1e-9)))
+            # actor_weight = min(10 * self.actor_weight, max(-10 * self.actor_weight, float(actor_loss) * self.actor_weight / (abs(normalized_actor_loss) + 1e-9)))
+            # entropy_weight = min(10 * self.entropy_weight, max(-10 * self.entropy_weight, float(entropy_loss) * self.entropy_weight / (abs(normalized_entropy_loss) + 1e-9)))
+
+            proposed_weight = self.proposed_weight
+            critic_weight = self.critic_weight
+            actor_weight = self.actor_weight
+            entropy_weight = self.entropy_weight
+
+            total_loss = proposed_loss * proposed_weight
+            total_loss += critic_loss * critic_weight
+            total_loss += actor_loss * actor_weight
+            total_loss += entropy_loss * entropy_weight
             total_loss.backward()
             self.optimizer.step()
 
@@ -199,13 +209,22 @@ class Optimizer(object):
 
             if step % 10 == 0:
                 print("n experiences: {n}, steps: {s}".format(n=n_experiences, s=step))
-                print("weighted normalized losses: \n\tproposed: {p} \
-                                                   \n\tcritic: {c} \
-                                                   \n\tactor: {a} \
-                                                   \n\tentropy: {e}\n".format(p=(proposed_loss / abs(normalized_proposed_loss) + 1e-9) * self.proposed_weight,
-                                                                              c=(critic_loss / abs(normalized_critic_loss) + 1e-9) * self.critic_weight,
-                                                                              a=(actor_loss / abs(normalized_actor_loss) + 1e-9) * self.actor_weight,
-                                                                              e=(entropy_loss / abs(normalized_entropy_loss) + 1e-9) * self.entropy_weight))
+                print("weighted losses: \n\tproposed: {p} \
+                                       \n\tcritic: {c} \
+                                       \n\tactor: {a} \
+                                       \n\tentropy: {e}\n".format(p=proposed_loss * proposed_weight,
+                                                                  c=critic_loss * critic_weight,
+                                                                  a=actor_loss * actor_weight,
+                                                                  e=entropy_loss * entropy_weight))
+
+                print("loss emas: \n\tproposed: {p} \
+                                   \n\tcritic: {c} \
+                                   \n\tactor: {a} \
+                                   \n\tentropy: {e}\n".format(p=normalized_proposed_loss,
+                                                              c=normalized_critic_loss,
+                                                              a=normalized_actor_loss,
+                                                              e=normalized_entropy_loss))
+
 
                 try:
                     torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
