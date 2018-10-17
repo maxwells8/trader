@@ -30,7 +30,9 @@ class Worker(object):
             # putting this while loop here because sometime the optimizer
             # is writing to the files and causes an exception
             try:
-                self.market_encoder = MarketEncoder()
+                # this is the lstm's version
+                # self.market_encoder = MarketEncoder()
+                self.market_encoder = AttentionMarketEncoder()
                 self.proposer = Proposer()
                 self.actor_critic = ActorCritic()
                 self.market_encoder.load_state_dict(torch.load(models_loc + '/market_encoder.pt'))
@@ -50,7 +52,9 @@ class Worker(object):
         self.policy_sigma = float(self.server.get("policy_sigma_" + name).decode("utf-8"))
         self.spread_func_param = float(self.server.get("spread_func_param_" + name).decode("utf-8"))
 
-        self.environment = Env(source, start, n_steps, self.spread_func_param, window)
+        # this is the lstm's version
+        # self.environment = Env(source, start, n_steps, self.spread_func_param, window)
+        self.environment = Env(source, start, n_steps, self.spread_func_param, window, get_time=True)
 
         self.window = window
         self.n_steps = n_steps
@@ -83,13 +87,27 @@ class Worker(object):
         for i_step in range(self.n_steps):
 
             if i_step >= self.window:
+
+                # try getting the latest versions of the models
+                try:
+                    self.market_encoder.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
+                    self.proposer.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
+                    self.actor_critic.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+                    self.market_encoder = self.market_encoder.cpu()
+                    self.proposer = self.proposer.cpu()
+                    self.actor_critic = self.actor_critic.cpu()
+                except Exception:
+                    pass
+
                 time_states.append(initial_time_states)
                 percents_in.append(initial_percent_in)
                 spreads.append(initial_spread)
 
-                market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu(), 'cpu')
+                # this is the lstm's version
+                # market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu(), 'cpu')
+                market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu())
 
-                queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma)
+                queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma).cpu()
                 proposed_actions.append(queried_actions)
 
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
@@ -100,6 +118,7 @@ class Worker(object):
                 mus.append(mu)
 
                 if self.test:
+                    time.sleep(0.025)
                     reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
                     reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
                     print("step:", i_step)
@@ -188,11 +207,10 @@ if __name__ == "__main__":
     server.set("spread_func_param_test", 0)
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
     models_loc = '../models'
-    window = 256
-    start = np.random.randint(0,200000)
-    # start = 0
-    n_steps = 100000
-    # n_steps = window + 256
+    window = 128
+    start = 0
+    n_steps = 1_000_000
     test = True
     worker = Worker(source, "test", models_loc, window, start, n_steps, test)
-    worker.run()
+    while True:
+        worker.run()

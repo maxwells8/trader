@@ -6,7 +6,6 @@
       <change beforePath="$PROJECT_DIR$/models/market_encoder.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/market_encoder.pt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/optimizer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/optimizer.pt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/proposer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/proposer.pt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/optimizer/optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/optimizer/optimizer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/start_optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_optimizer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/start_workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_workers.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/worker/worker.py" beforeDir="false" afterPath="$PROJECT_DIR$/worker/worker.py" afterDir="false" />
@@ -25,27 +24,27 @@
     <SUITE FILE_PATH="coverage/trader$networks.coverage" NAME="networks Coverage Results" MODIFIED="1535160709742" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/trader$normalize_data.coverage" NAME="normalize_data Coverage Results" MODIFIED="1534271760249" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/trader$start_optimizer.coverage" NAME="start_optimizer Coverage Results" MODIFIED="1539548495057" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/trader$worker.coverage" NAME="worker Coverage Results" MODIFIED="1534455176995" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/trader$worker__1_.coverage" NAME="worker (1) Coverage Results" MODIFIED="1539548426346" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/worker" />
+    <SUITE FILE_PATH="coverage/trader$worker.coverage" NAME="worker Coverage Results" MODIFIED="1539634433098" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/trader$worker__1_.coverage" NAME="worker (1) Coverage Results" MODIFIED="1539634449682" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/worker" />
   </component>
   <component name="FUSProjectUsageTrigger">
     <session id="-108150106">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="29" />
+          <entry key="project.closed" value="30" />
           <entry key="project.open.time.0" value="1" />
           <entry key="project.open.time.1" value="1" />
           <entry key="project.open.time.3" value="1" />
           <entry key="project.open.time.4" value="20" />
           <entry key="project.open.time.5" value="9" />
-          <entry key="project.open.time.6" value="3" />
-          <entry key="project.opened" value="35" />
+          <entry key="project.open.time.6" value="4" />
+          <entry key="project.opened" value="36" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.edit">
         <counts>
           <entry key="jl" value="18" />
-          <entry key="py" value="9249" />
+          <entry key="py" value="9282" />
           <entry key="txt" value="174" />
         </counts>
       </usages-collector>
@@ -53,7 +52,7 @@
         <counts>
           <entry key="Julia" value="18" />
           <entry key="PLAIN_TEXT" value="174" />
-          <entry key="Python" value="9249" />
+          <entry key="Python" value="9282" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.spring.boot.mvc.usages" />
@@ -64,14 +63,14 @@
         <counts>
           <entry key="Julia" value="1" />
           <entry key="Profiler Session" value="4" />
-          <entry key="Python" value="18" />
+          <entry key="Python" value="20" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.open">
         <counts>
           <entry key="jl" value="1" />
           <entry key="pstat" value="4" />
-          <entry key="py" value="18" />
+          <entry key="py" value="20" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.vcs.git.usages" />
@@ -79,11 +78,11 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="false">
+      <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/worker/worker.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="268">
-              <caret line="82" selection-start-line="82" selection-end-line="82" />
+            <state relative-caret-position="724">
+              <caret line="196" column="77" selection-start-line="196" selection-start-column="77" selection-end-line="196" selection-end-column="77" />
               <folding>
                 <element signature="e#0#12#0" expanded="true" />
               </folding>
@@ -91,11 +90,11 @@
           </provider>
         </entry>
       </file>
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="84">
-              <caret line="167" column="63" lean-forward="true" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
+              <caret line="167" column="63" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
             </state>
           </provider>
         </entry>
@@ -172,6 +171,9 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
+      <pane id="Scope" />
+      <pane id="PackagesPane" />
+      <pane id="AndroidView" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -198,9 +200,6 @@
           <select />
         </subPane>
       </pane>
-      <pane id="PackagesPane" />
-      <pane id="Scope" />
-      <pane id="AndroidView" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -229,7 +228,7 @@
       </list>
     </option>
   </component>
-  <component name="RunManager" selected="Python.start_optimizer">
+  <component name="RunManager" selected="Python.worker (1)">
     <configuration default="true" type="Application" factoryName="Application">
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
       <method v="2">
@@ -393,10 +392,10 @@
     </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.start_optimizer" />
-        <item itemvalue="Python.optimizer" />
         <item itemvalue="Python.worker (1)" />
         <item itemvalue="Python.worker" />
+        <item itemvalue="Python.start_optimizer" />
+        <item itemvalue="Python.optimizer" />
         <item itemvalue="Python.networks" />
       </list>
     </recent_temporary>
@@ -457,6 +456,7 @@
       <workItem from="1539058128766" duration="1961000" />
       <workItem from="1539280476614" duration="9000" />
       <workItem from="1539548345664" duration="167000" />
+      <workItem from="1539634335666" duration="228000" />
     </task>
     <task id="LOCAL-00001" summary="networks, environment, normalization done-ish, working on worker / optimizer">
       <created>1534555995097</created>
@@ -511,13 +511,13 @@
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="170418000" />
+    <option name="totallyTimeSpent" value="170646000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="1936" height="1056" extended-state="6" />
     <editor active="true" />
     <layout>
-      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.3872" />
+      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.39146668" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Image Layers" order="2" />
       <window_info id="Designer" order="3" />
@@ -594,9 +594,9 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/optimizer/optimizer.py</url>
-          <line>185</line>
-          <option name="timeStamp" value="7" />
+          <url>file://$PROJECT_DIR$/worker/worker.py</url>
+          <line>96</line>
+          <option name="timeStamp" value="8" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
@@ -701,6 +701,15 @@
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/start_optimizer.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state>
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/networks.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="629">
@@ -711,29 +720,27 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/worker/worker.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="268">
-          <caret line="82" selection-start-line="82" selection-end-line="82" />
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/start_optimizer.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state>
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="84">
-          <caret line="167" column="63" lean-forward="true" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
+          <caret line="167" column="63" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$USER_HOME$/Anaconda3/Lib/tokenize.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="176">
+          <caret line="451" selection-start-line="451" selection-end-line="451" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/worker/worker.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="724">
+          <caret line="196" column="77" selection-start-line="196" selection-start-column="77" selection-end-line="196" selection-end-column="77" />
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
         </state>
       </provider>
     </entry>

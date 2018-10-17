@@ -11,7 +11,7 @@ it, not just at the very beginning of the tick.
 """
 class Env(object):
 
-    def __init__(self, source, start, n_steps, spread_func_param=0, time_window=256):
+    def __init__(self, source, start, n_steps, spread_func_param=0, time_window=256, get_time=False):
         self.data = pd.DataFrame(pd.read_csv(source)).iloc[start:start+n_steps]
 
         self.time_window = time_window
@@ -27,10 +27,13 @@ class Env(object):
 
         self.spread_func = lambda: np.random.gamma(spread_func_param, 2 / 10000)
 
+        self.get_time = get_time
+
         first_time_state = TimeState(open=self.data['open'][self.cur_i],
                                      high=self.data['high'][self.cur_i],
                                      low=self.data['low'][self.cur_i],
                                      close=self.data['close'][self.cur_i],
+                                     time=self.data['time'][self.cur_i],
                                      spread=self.spread_func())
 
         self.time_states.append(first_time_state)
@@ -43,7 +46,7 @@ class Env(object):
 
         torch_time_states = []
         for time_state in self.time_states:
-            torch_time_states.append(time_state.as_tensor())
+            torch_time_states.append(time_state.as_tensor(with_time=self.get_time))
 
         if len(self.orders) > 0 and self.orders[-1].quantity > 0:
             coef = 1
@@ -91,6 +94,7 @@ class Env(object):
                                    high=self.data['high'][self.cur_i],
                                    low=self.data['low'][self.cur_i],
                                    close=self.data['close'][self.cur_i],
+                                   time=self.data['time'][self.cur_i],
                                    spread=self.spread_func())
 
         self.time_states.append(new_time_state)
@@ -165,18 +169,25 @@ class Order(object):
 
 class TimeState(object):
 
-    def __init__(self, open, high, low, close, spread):
+    def __init__(self, open, high, low, close, time, spread):
         self.open = open
         self.high = high
         self.low = low
         self.close = close
+        self.time = time
         self.spread = spread
         self.nd_repr = None
         self.tensor_repr = None
 
-    def as_ndarray(self):
+    def as_ndarray(self, with_time=False):
         if self.nd_repr is not None:
             return self.nd_repr
+        elif with_time:
+            self.nd_repr = np.array([self.open,
+                                     self.high,
+                                     self.low,
+                                     self.close,
+                                     self.time])
         else:
             self.nd_repr = np.array([self.open,
                                      self.high,
@@ -185,9 +196,15 @@ class TimeState(object):
 
         return self.nd_repr
 
-    def as_tensor(self):
+    def as_tensor(self, with_time=False):
         if self.tensor_repr is not None:
             return self.tensor_repr
+        elif with_time:
+            self.tensor_repr = torch.Tensor([self.open,
+                                             self.high,
+                                             self.low,
+                                             self.close,
+                                             self.time]).float().view(1, 1, -1)
         else:
             self.tensor_repr = torch.Tensor([self.open,
                                              self.high,

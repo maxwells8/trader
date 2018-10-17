@@ -26,7 +26,9 @@ class Optimizer(object):
     def __init__(self, models_loc):
         self.models_loc = models_loc
         # networks
-        self.MEN = MarketEncoder().cuda()
+        # this is the lstm's version
+        # self.MEN = MarketEncoder().cuda()
+        self.MEN = AttentionMarketEncoder().cuda()
         self.PN = Proposer().cuda()
         self.ACN = ActorCritic().cuda()
         self.ACN_ = ActorCritic().cuda()
@@ -36,7 +38,9 @@ class Optimizer(object):
             self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
             self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
         except FileNotFoundError:
-            self.MEN = MarketEncoder().cuda()
+            # this is the lstm's version
+            # self.MEN = MarketEncoder().cuda()
+            self.MEN = AttentionMarketEncoder().cuda()
             self.PN = Proposer().cuda()
             self.ACN = ActorCritic().cuda()
             self.ACN_ = ActorCritic().cuda()
@@ -128,7 +132,9 @@ class Optimizer(object):
             reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
 
             c = 1
-            market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
+            # this is the lstm's version
+            # market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
+            market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]))
             proposed = self.PN.forward(market_encoding)
             initial_policy, initial_value = self.ACN(market_encoding, proposed)
             _, target_value = self.ACN_(market_encoding, torch.cat(proposed_actions[0]).cuda())
@@ -139,7 +145,9 @@ class Optimizer(object):
             r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
             for i in range(self.trajectory_steps - 1):
                 r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
-                market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
+                # this is the lstm's version
+                # market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
+                market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]))
                 proposed = self.PN.forward(market_encoding)
                 next_policy, next_value = self.ACN(market_encoding, proposed)
                 delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
@@ -198,6 +206,7 @@ class Optimizer(object):
             total_loss += actor_loss * actor_weight
             total_loss += entropy_loss * entropy_weight
             total_loss.backward()
+
             self.optimizer.step()
 
             if prev_reward_ema != None:
@@ -207,33 +216,31 @@ class Optimizer(object):
             prev_reward_ema = reward_ema
             prev_reward_emsd = reward_emsd
 
-            if step % 10 == 0:
-                print("n experiences: {n}, steps: {s}".format(n=n_experiences, s=step))
-                print("weighted losses: \n\tproposed: {p} \
-                                       \n\tcritic: {c} \
-                                       \n\tactor: {a} \
-                                       \n\tentropy: {e}\n".format(p=proposed_loss * proposed_weight,
-                                                                  c=critic_loss * critic_weight,
-                                                                  a=actor_loss * actor_weight,
-                                                                  e=entropy_loss * entropy_weight))
+            print("n experiences: {n}, steps: {s}".format(n=n_experiences, s=step))
+            print("weighted losses: \n\tproposed: {p} \
+            \n\tcritic: {c} \
+            \n\tactor: {a} \
+            \n\tentropy: {e}\n".format(p=proposed_loss * proposed_weight,
+            c=critic_loss * critic_weight,
+            a=actor_loss * actor_weight,
+            e=entropy_loss * entropy_weight))
 
-                print("loss emas: \n\tproposed: {p} \
-                                   \n\tcritic: {c} \
-                                   \n\tactor: {a} \
-                                   \n\tentropy: {e}\n".format(p=normalized_proposed_loss,
-                                                              c=normalized_critic_loss,
-                                                              a=normalized_actor_loss,
-                                                              e=normalized_entropy_loss))
+            print("loss emas: \n\tproposed: {p} \
+            \n\tcritic: {c} \
+            \n\tactor: {a} \
+            \n\tentropy: {e}\n".format(p=normalized_proposed_loss,
+            c=normalized_critic_loss,
+            a=normalized_actor_loss,
+            e=normalized_entropy_loss))
 
-
-                try:
-                    torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
-                    torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
-                    torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
-                    torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
-                    self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
-                except Exception:
-                    print("failed to save")
+            try:
+                torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
+                torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
+                torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
+                torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
+                self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+            except Exception:
+                print("failed to save")
 
             for i, experience in enumerate(self.queued_experience):
                 if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):

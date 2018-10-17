@@ -23,12 +23,12 @@ if __name__ == "__main__":
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [0.03, 0.02, 0.01, 0, 0.01, 0.02, 0.03]
-    policy_sigmas = [1.25, 1.15, 1.075, 1, 0.925, 0.85, 0.75]
-    spread_func_params = [0, 0, 0, 0, 0, 0, 0]
+    proposed_sigmas = [-0.01, 0, 0.01]
+    policy_sigmas = [1.1, 1, 0.9]
+    spread_func_params = [0, 0, 0]
     models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
-    window = 256
-    n_steps = window + 256
+    window = 128
+    n_steps = window + 128
     server = redis.Redis("localhost")
 
     if server.get("reward_ema") == None:
@@ -39,7 +39,9 @@ if __name__ == "__main__":
     n_times = 0
     def start_process(name):
         i_source = random.randint(0, 7)
+        # i_source = 0
         start = random.randint(0, source_lengths[i_source] - n_steps - 1)
+        # start = 0
         process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, window, start, n_steps))
         process.start()
         global n_times
@@ -60,9 +62,10 @@ if __name__ == "__main__":
             started = False
             while not started:
                 process.join()
-                if server.llen("experience") < 256:
+                if server.llen("experience") < 64:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True
-                time.sleep(1)
+                else:
+                    time.sleep(1)
             print("reward ema:", server.get("reward_ema").decode("utf-8"))
