@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+
+import sys
+import json
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+from matplotlib.finance import candlestick2
+
+x = 0
+buy = None
+sell = None
+
+
+def indexes_of(value):
+    indexes = []
+    for index, label in enumerate(labels):
+        if label.lower() == value:
+            indexes.append(index)
+    return indexes
+
+
+def on_click(event):
+    global x
+    x = int(event.xdata)
+    print("X: " + str(x))
+
+
+def on_key(event):
+    print("Action " + event.key + " at index " + str(x))
+    if event.key == "up":
+        if x not in buy_index:
+            print("buy_index")
+            buy_index.append(x)
+            if x in sell_index:
+                sell_index.remove(x)
+        else:
+            return
+    elif event.key == "down":
+        if x not in sell_index:
+            print("sell_index")
+            sell_index.append(x)
+            if x in buy_index:
+                buy_index.remove(x)
+        else:
+            return
+    elif event.key == "delete":
+        if x in buy_index:
+            print("buy_index")
+            buy_index.remove(x)
+        elif x in sell_index:
+            print("sell_index")
+            sell_index.remove(x)
+        else:
+            return
+    else:
+        return   
+    remove_labels()
+    draw_labels()
+
+
+def remove_labels():
+    buy.remove()
+    sell.remove()
+
+
+def draw_labels():
+    global buy, sell
+    buy = ax.scatter(buy_index, [l[index] for index in buy_index], color='g', marker='^', s=100)
+    sell = ax.scatter(sell_index, [h[index] for index in sell_index], color='r', marker='v', s=100)
+    fig.canvas.draw()
+
+
+if __name__ == "__main__":
+    symbol = sys.argv[1].upper()
+    timeframe = sys.argv[2].upper()
+    file = symbol+"_"+timeframe+".json"
+
+    # Load in the data file
+    data = json.load(open("res/series/"+file))
+    bars = data["bars"]
+    o = [float(bar["open"]) for bar in bars]
+    h = [float(bar["high"]) for bar in bars]
+    l = [float(bar["low"]) for bar in bars]
+    c = [float(bar["close"]) for bar in bars]
+
+    # Load in the labels file
+    labels = json.load(open("res/labels/"+file))
+    buy_index = indexes_of("buy")
+    sell_index = indexes_of("sell")
+
+    # Configure the chart canvas
+    fig, ax = plt.subplots()
+    fig.subplots_adjust(bottom=0.05, top=0.95, left=0.05, right=0.95)
+    fig.canvas.mpl_connect('button_release_event', on_click)
+    fig.canvas.mpl_connect('key_press_event', on_key)
+
+    # Draw the candles and labels
+    candlestick2(ax, o, c, h, l, width=0.5)
+    draw_labels()
+    ax.grid(True)
+    ax.autoscale_view()
+
+    # Show the chart
+    plt.setp(plt.gca().get_xticklabels(), rotation=45, horizontalalignment='right')
+    plt.show()
+
+    # Save the labels
+    print("Saving labels to " + file)
+    labels = []
+    for index in range(0, len(o)):
+        if index in buy_index:
+            labels.append("Buy")
+        elif index in sell_index:
+            labels.append("Sell")
+        else:
+            labels.append("Wait")
+
+    if len(labels) != len(o):
+        raise ValueError()
+
+    with open("res/labels/"+file, 'w') as outfile:
+        json.dump(labels, outfile)

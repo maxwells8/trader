@@ -39,9 +39,9 @@ if __name__ == "__main__":
     n_times = 0
     def start_process(name):
         i_source = random.randint(0, 7)
-        # i_source = 0
+        i_source = 0
         start = random.randint(0, source_lengths[i_source] - n_steps - 1)
-        # start = 0
+        start = 0
         process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, window, start, n_steps))
         process.start()
         global n_times
@@ -62,7 +62,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 process.join()
-                if server.llen("experience") < 64:
+                if server.llen("experience") < 256:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True

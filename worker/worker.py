@@ -13,8 +13,8 @@ import redis
 import pickle
 import math
 
-np.random.seed(0)
-torch.manual_seed(0)
+# np.random.seed(0)
+# torch.manual_seed(0)
 torch.set_default_tensor_type(torch.FloatTensor)
 torch.set_num_threads(1)
 
@@ -32,6 +32,7 @@ class Worker(object):
             try:
                 # this is the lstm's version
                 # self.market_encoder = MarketEncoder()
+                # this is the attention version
                 self.market_encoder = AttentionMarketEncoder()
                 self.proposer = Proposer()
                 self.actor_critic = ActorCritic()
@@ -52,8 +53,6 @@ class Worker(object):
         self.policy_sigma = float(self.server.get("policy_sigma_" + name).decode("utf-8"))
         self.spread_func_param = float(self.server.get("spread_func_param_" + name).decode("utf-8"))
 
-        # this is the lstm's version
-        # self.environment = Env(source, start, n_steps, self.spread_func_param, window)
         self.environment = Env(source, start, n_steps, self.spread_func_param, window, get_time=True)
 
         self.window = window
@@ -105,6 +104,7 @@ class Worker(object):
 
                 # this is the lstm's version
                 # market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu(), 'cpu')
+                # this is the attention version
                 market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu())
 
                 queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma).cpu()
@@ -128,10 +128,13 @@ class Worker(object):
                     print("sum rewards:", all_rewards)
                     print("normalized sum rewards:", (all_rewards - reward_ema) / reward_emsd)
 
+                # adding steps_since_trade to help it learn
                 if action == 0:
                     placed_order = [0, float(queried_actions[0, 0])]
+                    steps_since_trade = 0
                 elif action == 1:
                     placed_order = [1, float(queried_actions[0, 1])]
+                    steps_since_trade = 0
                 else:
                     placed_order = [action]
 
@@ -208,9 +211,11 @@ if __name__ == "__main__":
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
     models_loc = '../models'
     window = 128
+    start = np.random.randint(0, 200000)
     start = 0
     n_steps = 1_000_000
+    n_steps = window + 128
     test = True
-    worker = Worker(source, "test", models_loc, window, start, n_steps, test)
     while True:
+        worker = Worker(source, "test", models_loc, window, start, n_steps, test)
         worker.run()

@@ -28,6 +28,7 @@ class Optimizer(object):
         # networks
         # this is the lstm's version
         # self.MEN = MarketEncoder().cuda()
+        # this is the attention version
         self.MEN = AttentionMarketEncoder().cuda()
         self.PN = Proposer().cuda()
         self.ACN = ActorCritic().cuda()
@@ -40,6 +41,7 @@ class Optimizer(object):
         except FileNotFoundError:
             # this is the lstm's version
             # self.MEN = MarketEncoder().cuda()
+            # this is the attention version
             self.MEN = AttentionMarketEncoder().cuda()
             self.PN = Proposer().cuda()
             self.ACN = ActorCritic().cuda()
@@ -134,6 +136,7 @@ class Optimizer(object):
             c = 1
             # this is the lstm's version
             # market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
+            # this is the attention version
             market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]))
             proposed = self.PN.forward(market_encoding)
             initial_policy, initial_value = self.ACN(market_encoding, proposed)
@@ -142,16 +145,17 @@ class Optimizer(object):
             policy = initial_policy.clone()
             value = initial_value.clone()
             v_trace = value
-            r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
+            r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
             for i in range(self.trajectory_steps - 1):
-                r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6)
+                r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
                 # this is the lstm's version
                 # market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
+                # this is the attention version
                 market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]))
                 proposed = self.PN.forward(market_encoding)
                 next_policy, next_value = self.ACN(market_encoding, proposed)
                 delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
-                delta_V *= ((torch.Tensor(reward[i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-6) + self.gamma * next_value - value)
+                delta_V *= ((torch.Tensor(reward[i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9) + self.gamma * next_value - value)
                 v_trace += c * (self.gamma ** i) * delta_V.detach()
 
                 if i == 0:
@@ -210,8 +214,8 @@ class Optimizer(object):
             self.optimizer.step()
 
             if prev_reward_ema != None:
-                self.ACN.state_dict()['critic2.weight'] = self.ACN.state_dict()['critic2.weight'] * reward_emsd / (prev_reward_emsd + 1e-6)
-                self.ACN.state_dict()['critic2.bias'] = self.ACN.state_dict()['critic2.bias'] * ((reward_emsd + 1e-6) + reward_ema - prev_reward_ema) / (prev_reward_emsd + 1e-6)
+                self.ACN.state_dict()['critic2.weight'] = self.ACN.state_dict()['critic2.weight'] * reward_emsd / (prev_reward_emsd + 1e-9)
+                self.ACN.state_dict()['critic2.bias'] = self.ACN.state_dict()['critic2.bias'] * ((reward_emsd + 1e-9) + reward_ema - prev_reward_ema) / (prev_reward_emsd + 1e-9)
 
             prev_reward_ema = reward_ema
             prev_reward_emsd = reward_emsd

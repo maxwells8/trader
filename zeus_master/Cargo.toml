@@ -1,0 +1,43 @@
+[package]
+name = "zeus"
+version = "0.1.0"
+authors = ["c0dewranglr <c0dewranglr@gmail.com>"]
+
+[lib]
+name = "zeus"
+crate-type = ["dylib"]
+
+[dependencies]
+ndarray = "0.12.0"
+hyper = "0.11.16"
+reqwest = "0.8.4"
+serde = "1.0.6"
+serde_json = "1.0.6"
+serde_derive = "1.0.6"
+ansi_term = "0.10.2"
+chrono = "0.4.0"
+rand = "0.5"
+num = "0.1.40"
+num_cpus = "1.8"
+bus = "1.4"
+uuid = { version = "0.7", features = ["v4"] }
+
+# DEPRECATED
+
+#tensorflow = "0.10.0"
+#tensorflow-sys = { version = "0.13.0", features = ["tensorflow_gpu"] }
+#serde-pickle = "0.4"
+#libc = "0.2"
+#libloading = "0.5"
+#pyo3 = "0.2"
+#clap = "2.29.4"
+
+#futures = "0.1.14"
+#hyper = "0.11.6"
+#tokio-core = "0.1.6"
+#hyper-tls = "0.1.2"
+#native-tls = "0.1.4"
+#juice = { path = "../juice/" }
+#coaster = { git = "https://github.com/spearow/coaster.git" , default-features = false, features = ["native"] }
+#coaster-blas = { git = "https://github.com/spearow/coaster-blas.git" , default-features = false, features = ["native"] }
+#coaster-nn = { git = "https://github.com/spearow/coaster-nn.git" , default-features = false, features = ["native"] }

@@ -1,0 +1,157 @@
+
+def evaluate(current_bar, action, target_bar):
+    if action < 2:
+        return calc_pips(current_bar[-2], target_bar[-2], action)
+    else:
+        return 3
+    '''
+    if action < 2: # BUY OR SELL
+        pip = calc_pips(current_bar[-2], target_bar[-2], action)
+        return 0 if pip >= 0 and pip < MIN_TARGET else pip
+    else: # WAIT
+        buy_pip = calc_pips(current_bar[-2], target_bar[-2], 0)
+        sell_pip = calc_pips(current_bar[-2], target_bar[-2], 1)
+        if buy_pip < MIN_TARGET and sell_pip < MIN_TARGET:
+            return np.amax([abs(buy_pip), abs(sell_pip)])
+        elif buy_pip < MIN_TARGET:
+            return abs(sell_pip) * -1 # If the sell is greater than the min target, negate it
+        elif sell_pip < MIN_TARGET:
+            return abs(buy_pip) * -1 # If the buy is greater than the min target, negate it
+        else:
+            return np.amax([abs(buy_pip), abs(sell_pip)]) * -1 # If both are greater than the min target, negate the largest one
+    '''
+
+x, reward_bars, action_bars = load_data(EUR_USD)
+test, _, test_bars = load_data(EUR_USD_TEST)
+states = [(np.array([x[index]]), np.array([x[index + 1]])) for index in range(len(x) - 1)]
+test_states = [(np.array([test[index]]), np.array([test[index + 1]])) for index in range(len(test) - 1)]
+
+agent = Trader(tuple(x.shape[1:]), 3)
+batch_size = 250
+epochs = 5000
+print(len(states))
+for epoch in range(epochs):
+    epoch_pips = 0.0
+    win = 0
+    actions = 0
+    for index in random.sample(range(len(states)), 500):
+        state, next_state = states[index]
+        current_bar, target_bar = action_bars[index]
+        action = agent.act(state)
+        reward = evaluate(current_bar, action, target_bar)
+        if action < 2:
+            actions += 1
+            epoch_pips += reward
+            if reward > 0:
+                win += 1
+        agent.remember(state, action, reward, next_state)
+
+    print("Epoch: {}/{}, Actions: {}, Pips: {:.4f}, W/L: {:.2f}, Epsilon: {:.2}".format(epoch, epochs, actions, epoch_pips, win / actions * 100, agent.epsilon))
+
+    if len(agent.memory) > batch_size:
+        agent.replay(batch_size)
+    
+    if epoch > 0 and epoch % 100 == 0:
+        print("Saving...")
+        agent.save("./save/zeus-dqn.h5")
+
+        test_pips = 0.0
+        test_win = 0
+        test_actions = 0
+        for index in range(len(test_states)):
+            state, next_state = test_states[index]
+            current_bar, target_bar = test_bars[index]
+            action = np.argmax(agent.model.predict(state)[0])
+            pips = calc_pips(current_bar[-2], target_bar[-2], action)
+            if action < 2:
+                test_actions += 1
+                test_pips += pips
+                if pips > 0:
+                    test_win += 1
+        print("TEST => Pips: {:.4f}, W/L: {:.2f}, Actions: {}".format(test_pips, test_win / test_actions * 100 if test_actions > 0 else 0, test_actions))
+
+'''
+if __name__ == "__main__":
+    env = gym.make('CartPole-v1')
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+    agent = DQNAgent(state_size, action_size)
+    # agent.load("./save/cartpole-dqn.h5")
+    done = False
+    batch_size = 32
+
+    for e in range(EPISODES):
+        state = env.reset()
+        state = np.reshape(state, [1, state_size])
+        for time in range(500):
+            # env.render()
+            action = agent.act(state)
+            next_state, reward, done, _ = env.step(action)
+            reward = reward if not done else -10
+            next_state = np.reshape(next_state, [1, state_size])
+            agent.remember(state, action, reward, next_state, done)
+            state = next_state
+            if done:
+                print("episode: {}/{}, score: {}, e: {:.2}"
+                      .format(e, EPISODES, time, agent.epsilon))
+                break
+        if len(agent.memory) > batch_size:
+            agent.replay(batch_size)
+'''
+
+'''
+def RNN(x, weights, biases):
+    x = tf.unstack(x, 50, 1)
+    lstm_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)
+    outputs, states = rnn.static_rnn(lstm_cell, x, dtype=tf.float32)
+    return tf.matmul(outputs[-1], weights['out']) + biases['out']
+
+x_train, y_train = load_data()
+
+X = tf.placeholder(tf.float32, [None, sample_size, 5])
+Y = tf.placeholder(tf.float32, [None, 3])
+
+weights = {
+    'out': tf.Variable(tf.random_normal([num_hidden, 3]))
+}
+biases = {
+    'out': tf.Variable(tf.random_normal([3]))
+}
+
+logits = RNN(X, weights, biases)
+prediction = tf.nn.softmax(logits)
+
+loss_op = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y))
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.1)
+train_op = optimizer.minimize(loss_op)
+
+correct_pred = tf.equal(tf.argmax(prediction, 1), tf.argmax(Y, 1))
+accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+init = tf.global_variables_initializer()
+
+with tf.Session() as sess:
+    sess.run(init)
+
+    train_len = len(x_train)
+    batch_size = int(train_len / 100)
+    for epoch in range(1000):
+        loss = acc = None
+        for batch in range(0, train_len, batch_size):
+            batch_end = batch + batch_size
+            x_batch = x_train[batch:batch_end]
+            y_batch = y_train[batch:batch_end]
+            
+            feed = {X: x_batch}
+            action = sess.run(prediction, feed_dict=feed)
+            print(action)
+            raise "Only run once"
+'''
+'''
+            grads = optimizer.compute_gradients(loss_op)
+            sess.run(optimizer.apply_gradients(grads), feed_dict=feed)
+            
+            loss, acc = sess.run([loss_op, accuracy], feed_dict=feed)
+
+        print ("Epoch #" + str(epoch + 1) + ", Loss= " + "{:.4f}".format(loss) + ", Accuracy= " + "{:.3f}".format(acc))
+'''

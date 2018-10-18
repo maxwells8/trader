@@ -72,8 +72,6 @@ class AttentionMarketEncoder(nn.Module):
 
         self.fc_out = nn.Linear(D_MODEL, D_MODEL)
 
-        self.fc_final = nn.Linear(D_MODEL, D_MODEL)
-
     def forward(self, market_values, percent_in, spread):
 
         window = market_values.size()[0]
@@ -111,7 +109,6 @@ class AttentionMarketEncoder(nn.Module):
 
         outputs = nn.MaxPool1d(n_entities)(outputs.transpose(1, 2))
         outputs = outputs.view(-1, D_MODEL)
-        outputs = F.leaky_relu(self.fc_final(outputs)) + outputs
 
         return outputs
 
@@ -125,17 +122,16 @@ class Proposer(nn.Module):
 
     def __init__(self):
         super(Proposer, self).__init__()
-
         # this is the lstm's version
-        # self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
-        self.fc1 = nn.Linear(D_MODEL, D_MODEL)
-        self.fc2 = nn.Linear(D_MODEL, 2)
+        # self.fc1 = nn.Linear(D_MODEL + 2, 2)
+        # this is the attention version
+        self.fc1 = nn.Linear(D_MODEL, 2)
 
     def forward(self, market_encoding, exploration_parameter=0):
         # this is the lstm's version
-        # x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL + 2)))
-        x = F.leaky_relu(self.fc1(market_encoding.view(-1, D_MODEL)))
-        x = F.sigmoid(self.fc2(x) + exploration_parameter)
+        # x = F.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL + 2)) + exploration_parameter)
+        # this is the attention version
+        x = F.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL)) + exploration_parameter)
         return x
 
 
@@ -153,13 +149,13 @@ class ActorCritic(nn.Module):
 
         # this is the lstm's version
         # self.fc1 = nn.Linear(D_MODEL + self.d_action + 2, D_MODEL)
+        # this is the attention version
         self.fc1 = nn.Linear(D_MODEL + self.d_action, D_MODEL)
 
         # self.actor1 = nn.Linear(D_MODEL, D_MODEL)
 
         # changing the structure of this so that it won't immediately learn to
         # just not trade
-
         # self.actor2 = nn.Linear(D_MODEL, 4)
         self.actor2 = nn.Linear(D_MODEL, 2)
 
@@ -171,9 +167,9 @@ class ActorCritic(nn.Module):
         # this is the lstm's version
         # x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL + 2),
         #                                      proposed_actions.view(-1, self.d_action)], 1)))
-
+        # this is the attention version
         x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL),
-                                             proposed_actions.view(-1, self.d_action)], 1)))
+                                             proposed_actions.view(-1, self.d_action)], 1))) + market_encoding.view(-1, D_MODEL)
 
         # policy = F.leaky_relu(self.actor1(x)) + x
         # policy = self.actor2(policy) * sigma
