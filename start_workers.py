@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import time
 import random
+import networks
 from start_worker import start_worker
 
 if __name__ == "__main__":
@@ -23,13 +24,12 @@ if __name__ == "__main__":
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [-0.01, 0, 0.01]
-    policy_sigmas = [1.1, 1, 0.9]
-    spread_func_params = [0, 0, 0]
+    proposed_sigmas = [-0.02, -0.01, 0, 0.01, 0.02]
+    policy_sigmas = [1.1, 1.05, 1, 0.95, 0.9]
+    spread_func_params = [0, 0, 0, 0, 0]
     models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
-    window = 128
-    n_steps = window + 128
     server = redis.Redis("localhost")
+    n_steps = int(server.get("trajectory_steps").decode("utf-8"))
 
     if server.get("reward_ema") == None:
         server.set("reward_ema", None)
@@ -40,9 +40,9 @@ if __name__ == "__main__":
     def start_process(name):
         i_source = random.randint(0, 7)
         i_source = 0
-        start = random.randint(0, source_lengths[i_source] - n_steps - 1)
+        start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
         start = 0
-        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, window, start, n_steps))
+        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, start, n_steps))
         process.start()
         global n_times
         n_times += 1
@@ -59,13 +59,13 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
+            process.join(10)
             started = False
             while not started:
-                process.join()
                 if server.llen("experience") < 256:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True
                 else:
-                    time.sleep(1)
+                    time.sleep(0.1)
             print("reward ema:", server.get("reward_ema").decode("utf-8"))

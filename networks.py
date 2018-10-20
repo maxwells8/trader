@@ -9,6 +9,7 @@ torch.manual_seed(0)
 D_BAR = 5
 D_MODEL = 128
 N_LSTM_LAYERS = 1
+WINDOW = 128
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -45,6 +46,11 @@ class MarketEncoder(nn.Module):
 
 
 class AttentionMarketEncoder(nn.Module):
+    """
+    TODO:
+        - add an output mlp instead of max pooling. this will force a fixed number
+        of entities, but should add to its ability to learn.
+    """
 
     def __init__(self):
         super(AttentionMarketEncoder, self).__init__()
@@ -53,11 +59,13 @@ class AttentionMarketEncoder(nn.Module):
         self.fc_in = nn.Linear(1, D_MODEL)
         self.fc_spread = nn.Linear(1, D_MODEL)
 
-        self.N = 4
+        self.N = 2
 
         self.h = 8
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
+
+        self.n_entities = WINDOW + 2
 
         self.WQs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
         for i, WQ in enumerate(self.WQs):
@@ -72,30 +80,29 @@ class AttentionMarketEncoder(nn.Module):
 
         self.fc_out = nn.Linear(D_MODEL, D_MODEL)
 
+        self.fc_final = nn.Linear(WINDOW + 2, 1)
+
     def forward(self, market_values, percent_in, spread):
 
-        window = market_values.size()[0]
-        n_entities = window + 2
-
-        inputs = [self.fc_bar(market_values.view(window, -1, D_BAR))]
-        inputs += [self.fc_in(percent_in.view(1, -1, 1))]
-        inputs += [self.fc_spread(spread.view(1, -1, 1))]
+        inputs = [F.leaky_relu(self.fc_bar(market_values.view(WINDOW, -1, D_BAR)))]
+        inputs += [F.leaky_relu(self.fc_in(percent_in.view(1, -1, 1)))]
+        inputs += [F.leaky_relu(self.fc_spread(spread.view(1, -1, 1)))]
         inputs = torch.cat(inputs).transpose(0, 1)
 
         for _ in range(self.N):
             heads = []
             for i in range(self.h):
                 Q = self.WQs[i](inputs)
-                Q_mean = Q.mean(dim=2).view(-1, n_entities, 1)
-                Q_std = Q.std(dim=2).view(-1, n_entities, 1)
+                Q_mean = Q.mean(dim=2).view(-1, self.n_entities, 1)
+                Q_std = Q.std(dim=2).view(-1, self.n_entities, 1)
                 Q = (Q - Q_mean) / Q_std
                 K = self.WKs[i](inputs)
-                K_mean = K.mean(dim=2).view(-1, n_entities, 1)
-                K_std = K.std(dim=2).view(-1, n_entities, 1)
+                K_mean = K.mean(dim=2).view(-1, self.n_entities, 1)
+                K_std = K.std(dim=2).view(-1, self.n_entities, 1)
                 K = (K - K_mean) / K_std
                 V = self.WVs[i](inputs)
-                V_mean = V.mean(dim=2).view(-1, n_entities, 1)
-                V_std = V.std(dim=2).view(-1, n_entities, 1)
+                V_mean = V.mean(dim=2).view(-1, self.n_entities, 1)
+                V_std = V.std(dim=2).view(-1, self.n_entities, 1)
                 V = (V - V_mean) / V_std
 
                 saliencies = torch.bmm(Q, K.transpose(1, 2))
@@ -107,8 +114,7 @@ class AttentionMarketEncoder(nn.Module):
             outputs = F.leaky_relu(self.fc_out(self.WO(heads))) + inputs
             inputs = outputs
 
-        outputs = nn.MaxPool1d(n_entities)(outputs.transpose(1, 2))
-        outputs = outputs.view(-1, D_MODEL)
+        outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).squeeze()
 
         return outputs
 

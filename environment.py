@@ -29,14 +29,15 @@ class Env(object):
 
         self.get_time = get_time
 
-        first_time_state = TimeState(open=self.data['open'][self.cur_i],
-                                     high=self.data['high'][self.cur_i],
-                                     low=self.data['low'][self.cur_i],
-                                     close=self.data['close'][self.cur_i],
-                                     time=self.data['time'][self.cur_i],
-                                     spread=self.spread_func())
+        for _ in range(self.time_window):
+            time_state = TimeState(open=self.data['open'][self.cur_i],
+                                         high=self.data['high'][self.cur_i],
+                                         low=self.data['low'][self.cur_i],
+                                         close=self.data['close'][self.cur_i],
+                                         time=self.data['time'][self.cur_i],
+                                         spread=self.spread_func())
 
-        self.time_states.append(first_time_state)
+            self.time_states.append(time_state)
 
     def get_state(self):
         # print(str(self.balance) + "\t" + str(self.value))

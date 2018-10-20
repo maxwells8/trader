@@ -8,6 +8,7 @@ import heapq
 import sys
 sys.path.insert(0, '../worker')
 from worker import Experience
+import networks
 from networks import *
 from environment import *
 import redis
@@ -73,8 +74,6 @@ class Optimizer(object):
         self.queued_batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
         self.prioritized_batch_size = int(self.server.get("prioritized_batch_size").decode("utf-8"))
 
-        self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
-
         self.queued_experience = []
         self.prioritized_experience = []
         try:
@@ -123,6 +122,8 @@ class Optimizer(object):
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*experiences))
             time_states = [*zip(*batch.time_states)]
+            for i, time_state_ in enumerate(time_states):
+                time_states[i] = torch.cat(time_state_)
             percent_in = [*zip(*batch.percents_in)]
             spread = [*zip(*batch.spreads)]
             mu = [*zip(*batch.mus)]
@@ -130,47 +131,138 @@ class Optimizer(object):
             place_action = [*zip(*batch.place_actions)]
             reward = [*zip(*batch.rewards)]
 
+            window = len(time_states) - len(percent_in)
+            assert window == networks.WINDOW
+            trajectory_steps = len(percent_in)
+            assert trajectory_steps == self.trajectory_steps
             reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
             reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
 
-            c = 1
-            # this is the lstm's version
-            # market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
-            # this is the attention version
-            market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]))
-            proposed = self.PN.forward(market_encoding)
-            initial_policy, initial_value = self.ACN(market_encoding, proposed)
-            _, target_value = self.ACN_(market_encoding, torch.cat(proposed_actions[0]).cuda())
-            proposed_loss = (-target_value).mean()
-            policy = initial_policy.clone()
-            value = initial_value.clone()
+            """
+            plan of attack for working through trajectories:
+            values = []
+            v_traces = []
+            fetch and normalize the final time states
+            calculate encoding and proposal
+            value = critic(encoding, proposal)
+            v_next = value
             v_trace = value
-            r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
-            for i in range(self.trajectory_steps - 1):
-                r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
-                # this is the lstm's version
-                # market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
-                # this is the attention version
-                market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]))
+            values.append(value)
+            v_traces.append(v_trace)
+            initialize c to 1
+            loop backwards through the trajectories:
+                fetch and normalize the time states
+                value = critic(encoding)
+                c *= pi / mu
+                delta_v = (pi / mu) * (reward + gamma * v_next - value)
+                v_trace = value + delta_v + gamma * c * (v_trace - v_next)
+                values.append(value)
+                v_traces.append(v_trace)
+            """
+
+            critic_loss = torch.Tensor([0])
+            actor_loss = torch.Tensor([0])
+            entropy_loss = torch.Tensor([0])
+            proposed_loss = torch.Tensor([0])
+
+            values = []
+            v_traces = []
+            time_states_ = torch.cat(time_states[-window:], dim=1).detach().cuda()
+            mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
+            std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
+            time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
+            spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
+            time_states_ = time_states_.transpose(0, 1)
+            market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-1]).cuda(), spread_)
+            proposed = self.PN.forward(market_encoding)
+
+            _, target_value = self.ACN_.forward(market_encoding, proposed)
+            proposed_loss_ = (-target_value).mean()
+            proposed_loss += proposed_loss_ / self.trajectory_steps
+
+            policy, value = self.ACN.forward(market_encoding, proposed)
+            v_next = value
+            v_trace = value
+            values.append(value)
+            v_traces.append(v_trace.detach())
+            c = 1
+            for i in range(1, self.trajectory_steps):
+                time_states_ = torch.cat(time_states[-window-i:-i], dim=1).cuda()
+                mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
+                std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
+                time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
+                spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
+                time_states_ = time_states_.transpose(0, 1)
+                market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
                 proposed = self.PN.forward(market_encoding)
-                next_policy, next_value = self.ACN(market_encoding, proposed)
-                delta_V = torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
-                delta_V *= ((torch.Tensor(reward[i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9) + self.gamma * next_value - value)
-                v_trace += c * (self.gamma ** i) * delta_V.detach()
 
-                if i == 0:
-                    first_delta_V = delta_V.clone()
+                _, target_value = self.ACN_.forward(market_encoding, proposed)
+                proposed_loss_ = (-target_value).mean()
+                proposed_loss += proposed_loss_ / self.trajectory_steps
 
-                c *= torch.min(self.max_c, policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
-                value = next_value.clone()
-                policy = next_policy.clone()
+                policy, value = self.ACN.forward(market_encoding, proposed)
+                pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).long().view(-1, 1))
+                mu_ = torch.Tensor(mu[-i-1]).view(-1, 1)
 
-            critic_loss = F.l1_loss(initial_value, v_trace)
-            actor_loss = -torch.max(torch.Tensor([-10]), torch.log(initial_policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))))
-            actor_loss *= torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))/torch.Tensor(mu[0]).view(-1, 1))
-            actor_loss *= first_delta_V.detach()
-            actor_loss = actor_loss.mean()
-            entropy_loss = (initial_policy * torch.max(torch.Tensor([-10]), torch.log(initial_policy))).mean()
+                actor_loss_ = -torch.max(torch.Tensor([-10]), torch.log(pi_))
+                actor_loss_ *= torch.min(self.max_rho, pi_/mu_)
+                actor_loss_ *= v_trace
+                actor_loss_ = actor_loss_.mean()
+                actor_loss += actor_loss_ / self.trajectory_steps
+
+                entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
+                entropy_loss += entropy_loss_ / self.trajectory_steps
+
+                c *= torch.min(self.max_c, pi_ / mu_)
+                r = (torch.Tensor(reward[-i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
+                delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
+                v_trace = value + delta_v + self.gamma * c * (v_trace - v_next)
+
+                critic_loss_ = F.l1_loss(value, v_trace)
+                critic_loss += critic_loss_ / self.trajectory_steps
+
+                values.append(value)
+                v_traces.append(v_trace.detach())
+
+            # c = 1
+            # # this is the lstm's version
+            # # market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]), 'cuda')
+            # # this is the attention version
+            # market_encoding = self.MEN.forward(torch.cat(time_states[0], dim=1).detach().cuda(), torch.Tensor(percent_in[0]), torch.Tensor(spread[0]))
+            # proposed = self.PN.forward(market_encoding)
+            # initial_policy, initial_value = self.ACN(market_encoding, proposed)
+            # _, target_value = self.ACN_(market_encoding, torch.cat(proposed_actions[0]).cuda())
+            # proposed_loss = (-target_value).mean()
+            # policy = initial_policy.clone()
+            # value = initial_value.clone()
+            # v_trace = value
+            # r = (torch.Tensor(reward[0]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
+            # for i in range(self.trajectory_steps - 1):
+            #     r += (self.gamma ** i) * (torch.Tensor(reward[i+1]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
+            #     # this is the lstm's version
+            #     # market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]), 'cuda')
+            #     # this is the attention version
+            #     market_encoding = self.MEN.forward(torch.cat(time_states[i+1], dim=1).detach().cuda(), torch.Tensor(percent_in[i]), torch.Tensor(spread[i]))
+            #     proposed = self.PN.forward(market_encoding)
+            #     next_policy, next_value = self.ACN(market_encoding, proposed)
+            #     delta_V = torch.min(self.max_rho, next_policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
+            #     delta_V *= ((torch.Tensor(reward[i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9) + self.gamma * next_value - value)
+            #     v_trace += c * (self.gamma ** i) * delta_V.detach()
+            #
+            #     if i == 0:
+            #         first_delta_V = delta_V.clone()
+            #
+            #     c *= torch.min(self.max_c, next_policy.gather(1, torch.Tensor(place_action[i]).long().view(-1, 1))/torch.Tensor(mu[i]).view(-1, 1))
+            #     value = next_value.clone()
+            #     policy = next_policy.clone()
+
+
+            # critic_loss = F.l1_loss(value, v_trace)
+            # actor_loss = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))))
+            # actor_loss *= torch.min(self.max_rho, policy.gather(1, torch.Tensor(place_action[0]).long().view(-1, 1))/torch.Tensor(mu[0]).view(-1, 1))
+            # actor_loss *= v_traces[-2]
+            # actor_loss = actor_loss.mean()
+            # entropy_loss = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
 
             normalized_proposed_loss = self.server.get("proposer_ema").decode("utf-8")
             normalized_critic_loss = self.server.get("critic_ema").decode("utf-8")
@@ -224,10 +316,10 @@ class Optimizer(object):
             print("weighted losses: \n\tproposed: {p} \
             \n\tcritic: {c} \
             \n\tactor: {a} \
-            \n\tentropy: {e}\n".format(p=proposed_loss * proposed_weight,
-            c=critic_loss * critic_weight,
-            a=actor_loss * actor_weight,
-            e=entropy_loss * entropy_weight))
+            \n\tentropy: {e}\n".format(p=float(proposed_loss * proposed_weight),
+            c=float(critic_loss * critic_weight),
+            a=float(actor_loss * actor_weight),
+            e=float(entropy_loss * entropy_weight)))
 
             print("loss emas: \n\tproposed: {p} \
             \n\tcritic: {c} \
@@ -246,14 +338,14 @@ class Optimizer(object):
             except Exception:
                 print("failed to save")
 
-            for i, experience in enumerate(self.queued_experience):
-                if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):
-                    smallest, i_smallest = torch.min(torch.abs((initial_value - v_trace)[len(self.queued_experience):]), dim=0)
-                    if torch.abs((initial_value - v_trace)[i]) > smallest:
-                        self.prioritized_experience[i_smallest] = experience
-                        (initial_value - v_trace)[len(self.queued_experience) + i_smallest] = torch.abs((initial_value - v_trace)[i])
-                elif self.prioritized_batch_size != 0:
-                    self.prioritized_experience.append(experience)
+            # for i, experience in enumerate(self.queued_experience):
+            #     if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):
+            #         smallest, i_smallest = torch.min(torch.abs((initial_value - v_trace)[len(self.queued_experience):]), dim=0)
+            #         if torch.abs((initial_value - v_trace)[i]) > smallest:
+            #             self.prioritized_experience[i_smallest] = experience
+            #             (initial_value - v_trace)[len(self.queued_experience) + i_smallest] = torch.abs((initial_value - v_trace)[i])
+            #     elif self.prioritized_batch_size != 0:
+            #         self.prioritized_experience.append(experience)
 
             self.queued_experience = []
             step += 1
