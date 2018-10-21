@@ -180,9 +180,9 @@ if __name__ == "__main__":
     source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
     models_loc = '../models'
     start = np.random.randint(0, 200000)
-    start = 0
+    # start = 0
     n_steps = 1_000_000
-    n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    # n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     test = True
     while True:
         worker = Worker(source, "test", models_loc, start, n_steps, test)

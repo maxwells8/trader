@@ -204,17 +204,18 @@ class Optimizer(object):
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).view(-1, 1)
 
+                c *= torch.min(self.max_c, pi_ / mu_)
+                r = (torch.Tensor(reward[-i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
+
                 actor_loss_ = -torch.max(torch.Tensor([-10]), torch.log(pi_))
                 actor_loss_ *= torch.min(self.max_rho, pi_/mu_)
-                actor_loss_ *= v_trace
+                actor_loss_ *= r + self.gamma * v_trace - value
                 actor_loss_ = actor_loss_.mean()
                 actor_loss += actor_loss_ / self.trajectory_steps
 
                 entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
                 entropy_loss += entropy_loss_ / self.trajectory_steps
 
-                c *= torch.min(self.max_c, pi_ / mu_)
-                r = (torch.Tensor(reward[-i]).view(-1, 1) - reward_ema) / (reward_emsd + 1e-9)
                 delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
                 v_trace = value + delta_v + self.gamma * c * (v_trace - v_next)
 
@@ -223,6 +224,7 @@ class Optimizer(object):
 
                 values.append(value)
                 v_traces.append(v_trace.detach())
+                v_next = value.detach()
 
             # c = 1
             # # this is the lstm's version
