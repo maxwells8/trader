@@ -135,9 +135,9 @@ class Proposer(nn.Module):
 
     def forward(self, market_encoding, exploration_parameter=0):
         # this is the lstm's version
-        # x = F.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL + 2)) + exploration_parameter)
+        # x = torch.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL + 2)) + exploration_parameter)
         # this is the attention version
-        x = F.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL)) + exploration_parameter)
+        x = torch.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL)) + exploration_parameter)
         return x
 
 

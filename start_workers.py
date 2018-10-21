@@ -14,20 +14,22 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     sources = [
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
+    "./normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
+    "./normalized_data/DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
     proposed_sigmas = [-0.02, -0.01, 0, 0.01, 0.02]
     policy_sigmas = [1.1, 1.05, 1, 0.95, 0.9]
     spread_func_params = [0, 0, 0, 0, 0]
-    models_loc = 'C:\\Users\\Preston\\Programming\\trader\\models'
+    import os
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    models_loc = dir_path + '/models/'
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
 

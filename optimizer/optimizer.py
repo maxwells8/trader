@@ -35,10 +35,10 @@ class Optimizer(object):
         self.ACN = ActorCritic().cuda()
         self.ACN_ = ActorCritic().cuda()
         try:
-            self.MEN.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
-            self.PN.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
-            self.ACN.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
-            self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+            self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
+            self.PN.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
+            self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
+            self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
         except FileNotFoundError:
             # this is the lstm's version
             # self.MEN = MarketEncoder().cuda()
@@ -48,9 +48,9 @@ class Optimizer(object):
             self.ACN = ActorCritic().cuda()
             self.ACN_ = ActorCritic().cuda()
 
-            torch.save(self.MEN.state_dict(), self.models_loc + '/market_encoder.pt')
-            torch.save(self.PN.state_dict(), self.models_loc + '/proposer.pt')
-            torch.save(self.ACN.state_dict(), self.models_loc + '/actor_critic.pt')
+            torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
+            torch.save(self.PN.state_dict(), self.models_loc + 'proposer.pt')
+            torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
 
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
@@ -81,7 +81,7 @@ class Optimizer(object):
                                         [params for params in self.PN.parameters()] +
                                         [params for params in self.ACN.parameters()],
                                         weight_decay=self.weight_penalty)
-            self.optimizer.load_state_dict(torch.load(models_loc + "/optimizer.pt"))
+            self.optimizer.load_state_dict(torch.load(models_loc + "optimizer.pt"))
 
         except:
             self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
@@ -89,7 +89,7 @@ class Optimizer(object):
                                         [params for params in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
-            torch.save(self.optimizer.state_dict(), self.models_loc + '/optimizer.pt')
+            torch.save(self.optimizer.state_dict(), self.models_loc + 'optimizer.pt')
 
     def run(self):
 
@@ -332,11 +332,11 @@ class Optimizer(object):
             e=normalized_entropy_loss))
 
             try:
-                torch.save(self.MEN.state_dict(), self.models_loc + "/market_encoder.pt")
-                torch.save(self.PN.state_dict(), self.models_loc + "/proposer.pt")
-                torch.save(self.ACN.state_dict(), self.models_loc + "/actor_critic.pt")
-                torch.save(self.optimizer.state_dict(), self.models_loc + "/optimizer.pt")
-                self.ACN_.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+                torch.save(self.MEN.state_dict(), self.models_loc + "market_encoder.pt")
+                torch.save(self.PN.state_dict(), self.models_loc + "proposer.pt")
+                torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
+                torch.save(self.optimizer.state_dict(), self.models_loc + "optimizer.pt")
+                self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
             except Exception:
                 print("failed to save")
 

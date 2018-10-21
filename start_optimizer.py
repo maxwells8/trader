@@ -34,4 +34,7 @@ server.set("queued_batch_size", 4)
 
 server.set("reward_tau", 0.0001)
 
-optimizer.Optimizer('C:\\Users\\Preston\\Programming\\trader\\models').run()
+import os
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
+optimizer.Optimizer(dir_path + '/models/').run()
