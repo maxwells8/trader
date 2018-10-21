@@ -37,9 +37,9 @@ class Worker(object):
                 self.market_encoder = AttentionMarketEncoder()
                 self.proposer = Proposer()
                 self.actor_critic = ActorCritic()
-                self.market_encoder.load_state_dict(torch.load(models_loc + '/market_encoder.pt'))
-                self.proposer.load_state_dict(torch.load(models_loc + '/proposer.pt'))
-                self.actor_critic.load_state_dict(torch.load(models_loc + '/actor_critic.pt'))
+                self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
+                self.proposer.load_state_dict(torch.load(models_loc + 'proposer.pt'))
+                self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt'))
                 self.market_encoder = self.market_encoder.cpu()
                 self.proposer = self.proposer.cpu()
                 self.actor_critic = self.actor_critic.cpu()
@@ -84,9 +84,9 @@ class Worker(object):
 
             # try getting the latest versions of the models
             try:
-                self.market_encoder.load_state_dict(torch.load(self.models_loc + '/market_encoder.pt'))
-                self.proposer.load_state_dict(torch.load(self.models_loc + '/proposer.pt'))
-                self.actor_critic.load_state_dict(torch.load(self.models_loc + '/actor_critic.pt'))
+                self.market_encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
+                self.proposer.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
+                self.actor_critic.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
                 self.market_encoder = self.market_encoder.cpu()
                 self.proposer = self.proposer.cpu()
                 self.actor_critic = self.actor_critic.cpu()
@@ -177,8 +177,10 @@ if __name__ == "__main__":
     server.set("proposed_sigma_test", 0)
     server.set("policy_sigma_test", 1)
     server.set("spread_func_param_test", 0)
-    source = "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
-    models_loc = '../models'
+    source = "./normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
+    import os
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    models_loc = dir_path + '/models/'
     start = np.random.randint(0, 200000)
     start = 0
     n_steps = 1_000_000
