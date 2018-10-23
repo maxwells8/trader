@@ -9,7 +9,7 @@ torch.manual_seed(0)
 D_BAR = 5
 D_MODEL = 128
 N_LSTM_LAYERS = 1
-WINDOW = 128
+WINDOW = 120
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -162,8 +162,8 @@ class ActorCritic(nn.Module):
 
         # changing the structure of this so that it won't immediately learn to
         # just not trade
-        # self.actor2 = nn.Linear(D_MODEL, 4)
-        self.actor2 = nn.Linear(D_MODEL, 2)
+        self.actor2 = nn.Linear(D_MODEL, 4)
+        # self.actor2 = nn.Linear(D_MODEL, 2)
 
         # self.critic1 = nn.Linear(D_MODEL, D_MODEL)
         self.critic2 = nn.Linear(D_MODEL, 1)

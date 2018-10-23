@@ -62,11 +62,13 @@ class Optimizer(object):
         self.critic_tau = float(self.server.get("critic_tau").decode("utf-8"))
         self.actor_tau = float(self.server.get("actor_tau").decode("utf-8"))
         self.entropy_tau = float(self.server.get("entropy_tau").decode("utf-8"))
+        self.non_investing_tau = float(self.server.get("non_investing_tau").decode("utf-8"))
 
         self.proposed_weight = float(self.server.get("proposed_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
         self.actor_weight = float(self.server.get("actor_weight").decode("utf-8"))
         self.entropy_weight = float(self.server.get("entropy_weight").decode("utf-8"))
+        self.non_investing_weight = float(self.server.get("non_investing_weight").decode("utf-8"))
         self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
 
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
@@ -164,6 +166,7 @@ class Optimizer(object):
             actor_loss = torch.Tensor([0])
             entropy_loss = torch.Tensor([0])
             proposed_loss = torch.Tensor([0])
+            non_investing_loss = torch.Tensor([0])
 
             values = []
             v_traces = []
@@ -173,6 +176,9 @@ class Optimizer(object):
             time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
             spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
             time_states_ = time_states_.transpose(0, 1)
+            # lstm
+            # market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-1]).cuda(), spread_, 'cuda')
+            # attention
             market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-1]).cuda(), spread_)
             proposed = self.PN.forward(market_encoding)
 
@@ -193,7 +199,11 @@ class Optimizer(object):
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
                 spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
                 time_states_ = time_states_.transpose(0, 1)
+                # lstm
+                # market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]), 'cuda')
+                # attention
                 market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
+
                 proposed = self.PN.forward(market_encoding)
 
                 _, target_value = self.ACN_.forward(market_encoding, proposed)
@@ -215,6 +225,8 @@ class Optimizer(object):
 
                 entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
                 entropy_loss += entropy_loss_ / self.trajectory_steps
+
+                non_investing_loss += policy[:, 2:].mean() / self.trajectory_steps
 
                 delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
                 v_trace = value + delta_v + self.gamma * c * (v_trace - v_next)
@@ -270,24 +282,29 @@ class Optimizer(object):
             normalized_critic_loss = self.server.get("critic_ema").decode("utf-8")
             normalized_actor_loss = self.server.get("actor_ema").decode("utf-8")
             normalized_entropy_loss = self.server.get("entropy_ema").decode("utf-8")
+            normalized_non_investing_loss = self.server.get("entropy_ema").decode("utf-8")
             if normalized_proposed_loss == 'None':
                 normalized_proposed_loss = float(proposed_loss)
                 normalized_critic_loss = float(critic_loss)
                 normalized_actor_loss = float(actor_loss)
                 normalized_entropy_loss = float(entropy_loss)
+                normalized_non_investing_loss = float(non_investing_loss)
                 self.server.set("proposer_ema", normalized_proposed_loss)
                 self.server.set("critic_ema", normalized_critic_loss)
                 self.server.set("actor_ema", normalized_actor_loss)
                 self.server.set("entropy_ema", normalized_entropy_loss)
+                self.server.set("non_investing_ema", normalized_non_investing_loss)
             else:
                 normalized_proposed_loss = float(self.proposer_tau * proposed_loss + (1 - self.proposer_tau) * float(normalized_proposed_loss))
                 normalized_critic_loss = float(self.critic_tau * critic_loss + (1 - self.critic_tau) * float(normalized_critic_loss))
                 normalized_actor_loss = float(self.actor_tau * actor_loss + (1 - self.actor_tau) * float(normalized_actor_loss))
                 normalized_entropy_loss = float(self.entropy_tau * entropy_loss + (1 - self.entropy_tau) * float(normalized_entropy_loss))
+                normalized_non_investing_loss = float(self.non_investing_tau * non_investing_loss + (1 - self.non_investing_tau) * float(normalized_non_investing_loss))
                 self.server.set("proposer_ema", normalized_proposed_loss)
                 self.server.set("critic_ema", normalized_critic_loss)
                 self.server.set("actor_ema", normalized_actor_loss)
                 self.server.set("entropy_ema", normalized_entropy_loss)
+                self.server.set("non_investing_ema", normalized_non_investing_loss)
 
             # proposed_weight = min(10 * self.proposed_weight, max(-10 * self.proposed_weight, float(proposed_loss) * self.proposed_weight / (abs(normalized_proposed_loss) + 1e-9)))
             # critic_weight = min(10 * self.critic_weight, max(-10 * self.critic_weight, float(critic_loss) * self.critic_weight / (abs(normalized_critic_loss) + 1e-9)))
@@ -298,11 +315,29 @@ class Optimizer(object):
             critic_weight = self.critic_weight
             actor_weight = self.actor_weight
             entropy_weight = self.entropy_weight
+            non_investing_weight = self.non_investing_weight
+
+            if float(proposed_loss) > 10 or float(proposed_loss) < -10:
+                proposed_loss = proposed_loss * 10 / float(proposed_loss)
+
+            if float(critic_loss) > 10 or float(critic_loss) < -10:
+                critic_loss = critic_loss * 10 / float(critic_loss)
+
+            if float(actor_loss) > 10 or float(actor_loss) < -10:
+                actor_loss = actor_loss * 10 / float(actor_loss)
+
+            if float(entropy_loss) > 10 or float(entropy_loss) < -10:
+                entropy_loss = entropy_loss * 10 / float(entropy_loss)
+
+            if float(non_investing_loss) > 10 or float(non_investing_loss) < -10:
+                non_investing_loss = non_investing_loss * 10 / float(non_investing_loss)
 
             total_loss = proposed_loss * proposed_weight
             total_loss += critic_loss * critic_weight
             total_loss += actor_loss * actor_weight
             total_loss += entropy_loss * entropy_weight
+            total_loss += non_investing_loss * non_investing_weight
+
             total_loss.backward()
 
             self.optimizer.step()
@@ -318,18 +353,22 @@ class Optimizer(object):
             print("weighted losses: \n\tproposed: {p} \
             \n\tcritic: {c} \
             \n\tactor: {a} \
-            \n\tentropy: {e}\n".format(p=float(proposed_loss * proposed_weight),
+            \n\tentropy: {e} \
+            \n\tnon_investing: {i}".format(p=float(proposed_loss * proposed_weight),
             c=float(critic_loss * critic_weight),
             a=float(actor_loss * actor_weight),
-            e=float(entropy_loss * entropy_weight)))
+            e=float(entropy_loss * entropy_weight),
+            i=float(non_investing_loss * non_investing_weight)))
 
             print("loss emas: \n\tproposed: {p} \
             \n\tcritic: {c} \
             \n\tactor: {a} \
-            \n\tentropy: {e}\n".format(p=normalized_proposed_loss,
+            \n\tentropy: {e} \
+            \n\tnon_investing: {i}".format(p=normalized_proposed_loss,
             c=normalized_critic_loss,
             a=normalized_actor_loss,
-            e=normalized_entropy_loss))
+            e=normalized_entropy_loss,
+            i=normalized_non_investing_loss))
 
             try:
                 torch.save(self.MEN.state_dict(), self.models_loc + "market_encoder.pt")
@@ -339,6 +378,15 @@ class Optimizer(object):
                 self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
             except Exception:
                 print("failed to save")
+
+            if step % 100 == 0:
+                try:
+                    torch.save(self.MEN.state_dict(), self.models_loc + "market_encoder" + "{step}".format(step=step) + ".pt")
+                    torch.save(self.PN.state_dict(), self.models_loc + "proposer" + "{step}".format(step=step) + ".pt")
+                    torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic" + "{step}".format(step=step) + ".pt")
+                    torch.save(self.optimizer.state_dict(), self.models_loc + "optimizer" + "{step}".format(step=step) + ".pt")
+                except Exception:
+                    print("failed to save")
 
             # for i, experience in enumerate(self.queued_experience):
             #     if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):

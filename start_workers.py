@@ -24,9 +24,9 @@ if __name__ == "__main__":
     "./normalized_data/DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [-0.02, -0.01, 0, 0.01, 0.02]
-    policy_sigmas = [1.1, 1.05, 1, 0.95, 0.9]
-    spread_func_params = [0, 0, 0, 0, 0]
+    proposed_sigmas = [0, 0, -0.01, 0.01, 0, 0]
+    policy_sigmas = [1.05, 1, 1, 1, 1, 0.95]
+    spread_func_params = [0, 0, 0, 0, 0, 0]
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/models/'
@@ -64,7 +64,7 @@ if __name__ == "__main__":
             process.join(10)
             started = False
             while not started:
-                if server.llen("experience") < 256:
+                if server.llen("experience") < 16:
                     print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True

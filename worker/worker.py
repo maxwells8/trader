@@ -99,7 +99,7 @@ class Worker(object):
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
             spread_ = spread_ / std
             # this is the lstm's version
-            # market_encoding = self.market_encoder.forward(initial_time_states, torch.Tensor([initial_percent_in]).cpu(), torch.Tensor([initial_spread]).cpu(), 'cpu')
+            # market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu(), 'cpu')
             # this is the attention version
             market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu())
             percents_in.append(percent_in_)
@@ -123,7 +123,7 @@ class Worker(object):
                 print("policy:", policy)
                 print("value:", value * reward_emsd + reward_ema)
                 print("sum rewards:", all_rewards)
-                print("normalized sum rewards:", (all_rewards - reward_ema) / reward_emsd)
+                print("normalized sum rewards:", (all_rewards - reward_ema) / (reward_emsd + 1e-9))
 
             # adding steps_since_trade to help it learn
             if action in [0, 1]:
@@ -161,7 +161,7 @@ class Worker(object):
                 self.server.rpush("experience", pickle.dumps(experience, protocol=pickle.HIGHEST_PROTOCOL))
 
         print("name: {name}, steps: {steps}, time: {time}, sum all rewards = {reward}".format(name=self.name, steps=i_step, time=time.time()-t0, reward=np.sum(all_rewards)))
-
+        return all_rewards
 
 Experience = namedtuple('Experience', ('time_states',
                                        'percents_in',
@@ -177,15 +177,21 @@ if __name__ == "__main__":
     server.set("proposed_sigma_test", 0)
     server.set("policy_sigma_test", 1)
     server.set("spread_func_param_test", 0)
-    source = "./normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
+    source = "../normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    models_loc = dir_path + '/models/'
+    models_loc = dir_path + '/../models/'
     start = np.random.randint(0, 200000)
     # start = 0
     n_steps = 1_000_000
     # n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     test = True
+    i = 1
+    sum_rewards = 0
     while True:
         worker = Worker(source, "test", models_loc, start, n_steps, test)
-        worker.run()
+        sum_rewards += worker.run()
+        print("AVERAGE RETURN:", sum_rewards / i)
+        print("NUMBER OF SAMPLES:", i)
+        time.sleep(2)
+        i += 1
