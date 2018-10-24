@@ -82,6 +82,7 @@ class Optimizer(object):
             self.optimizer = optim.Adam([params for params in self.MEN.parameters()] +
                                         [params for params in self.PN.parameters()] +
                                         [params for params in self.ACN.parameters()],
+                                        lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
             self.optimizer.load_state_dict(torch.load(models_loc + "optimizer.pt"))
 
@@ -226,7 +227,7 @@ class Optimizer(object):
                 entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
                 entropy_loss += entropy_loss_ / self.trajectory_steps
 
-                non_investing_loss += policy[:, 2:].mean() / self.trajectory_steps
+                non_investing_loss += policy[:, 2:].sum(dim=1).mean() / self.trajectory_steps
 
                 delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
                 v_trace = value + delta_v + self.gamma * c * (v_trace - v_next)
@@ -379,7 +380,7 @@ class Optimizer(object):
             except Exception:
                 print("failed to save")
 
-            if step % 100 == 0:
+            if step % 1000 == 0:
                 try:
                     torch.save(self.MEN.state_dict(), self.models_loc + "market_encoder" + "{step}".format(step=step) + ".pt")
                     torch.save(self.PN.state_dict(), self.models_loc + "proposer" + "{step}".format(step=step) + ".pt")

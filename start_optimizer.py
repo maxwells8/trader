@@ -23,14 +23,14 @@ server.set("actor_ema", None)
 server.set("entropy_ema", None)
 server.set("non_investing_ema", None)
 
-server.set("proposed_weight", 0.25)
+server.set("proposed_weight", 1)
 server.set("critic_weight", 1)
 server.set("actor_weight", 1)
-server.set("entropy_weight", 0.1)
-server.set("non_investing_weight", 0.5)
+server.set("entropy_weight", 1)
+server.set("non_investing_weight", 1)
 server.set("weight_penalty", 0.01)
 
-server.set("learning_rate", 0.0001)
+server.set("learning_rate", 0.001)
 
 server.set("prioritized_batch_size", 0)
 server.set("queued_batch_size", 4)
