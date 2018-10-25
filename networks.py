@@ -162,8 +162,8 @@ class ActorCritic(nn.Module):
 
         # changing the structure of this so that it won't immediately learn to
         # just not trade
-        self.actor2 = nn.Linear(D_MODEL, 4)
-        # self.actor2 = nn.Linear(D_MODEL, 2)
+        # self.actor2 = nn.Linear(D_MODEL, 4)
+        self.actor2 = nn.Linear(D_MODEL, 2)
 
         # self.critic1 = nn.Linear(D_MODEL, D_MODEL)
         self.critic2 = nn.Linear(D_MODEL, 1)

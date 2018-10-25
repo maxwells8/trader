@@ -182,9 +182,9 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/../models/'
     start = np.random.randint(0, 200000)
-    start = 0
+    # start = 0
     n_steps = 1_000_000
-    n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    # n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     test = True
     i = 1
     sum_rewards = 0

@@ -240,8 +240,8 @@ class Optimizer(object):
                 advantage_buy = potential_gain_buy - actor_pot_mean
                 advantage_sell = potential_gain_sell - actor_pot_mean
 
-                actor_pot_loss_buy = log_prob_buy * advantage_buy.detach()
-                actor_pot_loss_sell = log_prob_sell * advantage_sell.detach()
+                actor_pot_loss_buy = log_prob_buy * advantage_buy.detach() * proposed[:,0].view(-1, 1)
+                actor_pot_loss_sell = log_prob_sell * advantage_sell.detach() * proposed[:,1].view(-1, 1)
 
                 actor_pot_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.trajectory_steps
 
