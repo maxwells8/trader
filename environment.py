@@ -135,7 +135,7 @@ class Env(object):
     def orders_rewards(self):
         rewards = []
         for order in self.orders:
-            rewards.append(self.time_states[-1].close - order.open_price)
+            rewards.append(order.value(self.time_states[-1].close))
 
         return rewards
 
