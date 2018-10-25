@@ -225,20 +225,25 @@ class Optimizer(object):
                 actor_v_loss_ = actor_v_loss_.mean()
                 actor_v_loss += actor_v_loss_ / self.trajectory_steps
 
-                if i > self.trajectory_steps / 2:
-                    log_prob_buy = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.zeros(policy.size()[0], 1).long()))).cuda()
-                    potential_gain_buy = torch.cat(time_states[-i:-i + int(self.trajectory_steps / 2)], dim=1)[:,:,3].cuda().max(1)[0].view(-1, 1)
-                    potential_gain_buy -= time_states[-i][:,:,3].cuda()
-                    potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(int(self.trajectory_steps / 2)))
-                    actor_pot_loss_buy = log_prob_buy * potential_gain_buy.detach()
+                log_prob_buy = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.zeros(policy.size()[0], 1).long()))).cuda()
+                potential_gain_buy = torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().max(1)[0].view(-1, 1)
+                potential_gain_buy -= time_states[-i][:,:,3].cuda()
+                potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
 
-                    log_prob_sell = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.ones(policy.size()[0], 1).long()))).cuda()
-                    potential_gain_sell = time_states[-i][:,:,3].cuda()
-                    potential_gain_sell -= torch.cat(time_states[-i:-i + int(self.trajectory_steps / 2)], dim=1)[:,:,3].cuda().min(1)[0].view(-1, 1)
-                    potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(int(self.trajectory_steps / 2)))
-                    actor_pot_loss_sell = log_prob_sell * potential_gain_sell.detach()
+                log_prob_sell = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.ones(policy.size()[0], 1).long()))).cuda()
+                potential_gain_sell = time_states[-i][:,:,3].cuda()
+                potential_gain_sell -= torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().min(1)[0].view(-1, 1)
+                potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
 
-                    actor_pot_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.trajectory_steps
+                actor_pot_mean = potential_gain_buy.mean() + potential_gain_sell.mean()
+
+                advantage_buy = potential_gain_buy - actor_pot_mean
+                advantage_sell = potential_gain_sell - actor_pot_mean
+
+                actor_pot_loss_buy = log_prob_buy * advantage_buy.detach()
+                actor_pot_loss_sell = log_prob_sell * advantage_sell.detach()
+
+                actor_pot_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.trajectory_steps
 
                 entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
                 entropy_loss += entropy_loss_ / self.trajectory_steps
