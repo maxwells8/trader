@@ -23,7 +23,7 @@ class Optimizer(object):
         self.models_loc = models_loc
 
         self.encoder = AttentionMarketEncoder().cuda()
-        self.decoder = DecoderProbabilities().cuda()
+        self.decoder = Decoder().cuda()
         try:
             self.encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
             self.decoder.load_state_dict(torch.load(self.models_loc + 'decoder.pt'))
@@ -80,19 +80,16 @@ class Optimizer(object):
                 time_states_ = time_states_.transpose(0, 1)
 
                 market_encoding = self.encoder.forward(time_states_, spread_)
-                probabilities = self.decoder.forward(market_encoding, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
+                value = self.decoder.forward(market_encoding, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
 
-                log_prob_buy = torch.log(probabilities.gather(1, torch.zeros(probabilities.size()[0], 1).long())).cuda()
                 potential_gain_buy = torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().max(1)[0].view(-1, 1)
                 potential_gain_buy -= time_states[-i][:,:,3].cuda() - torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
 
-                log_prob_sell = torch.log(probabilities.gather(1, torch.ones(probabilities.size()[0], 1).long())).cuda()
                 potential_gain_sell = time_states[-i][:,:,3].cuda() + torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_sell -= torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().min(1)[0].view(-1, 1)
                 potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
 
-                log_prob_stay = torch.log(probabilities.gather(1, 2*torch.ones(probabilities.size()[0], 1).long())).cuda()
                 potential_gain_stay = torch.zeros_like(potential_gain_buy)
 
                 actor_pot_mean = (potential_gain_buy + potential_gain_sell + potential_gain_stay) / 3
@@ -101,9 +98,13 @@ class Optimizer(object):
                 advantage_sell = potential_gain_sell - actor_pot_mean
                 advantage_stay = potential_gain_stay - actor_pot_mean
 
-                actor_pot_loss_buy = -log_prob_buy * advantage_buy.detach()
-                actor_pot_loss_sell = -log_prob_sell * advantage_sell.detach()
-                actor_pot_loss_stay = -log_prob_stay * advantage_stay.detach()
+                # print(value[:, 0].view(-1, 1), advantage_buy.detach())
+                # print(value[:, 1].view(-1, 1), advantage_sell.detach())
+                # print(value[:, 2].view(-1, 1), advantage_stay.detach())
+                # print()
+                actor_pot_loss_buy = F.l1_loss(value[:, 0].view(-1, 1), advantage_buy.detach())
+                actor_pot_loss_sell = F.l1_loss(value[:, 1].view(-1, 1), advantage_sell.detach())
+                actor_pot_loss_stay = F.l1_loss(value[:, 2].view(-1, 1), advantage_stay.detach())
 
                 total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.trajectory_steps
 
@@ -118,3 +119,5 @@ class Optimizer(object):
                 torch.save(self.decoder.state_dict(), self.models_loc + "decoder.pt")
             except Exception:
                 print("failed to save")
+
+            step += 1

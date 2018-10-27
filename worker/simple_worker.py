@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import time
 import sys
@@ -38,6 +39,13 @@ class Worker(object):
         time_states = time_states_
         t0 = time.time()
         for i_step in range(self.n_steps):
+            for time_state in time_states:
+                for time_state_ in time_state.squeeze():
+                    try:
+                        float(time_state_)
+                        assert not np.isnan(time_state_)
+                    except Exception:
+                        raise ValueError("Incorrect value in time state: " + str(time_state_))
 
             spreads.append(spread_)
 
@@ -57,3 +65,16 @@ class Worker(object):
         print("name: {name}, steps: {steps}, time: {time}".format(name=self.name, steps=i_step, time=time.time()-t0))
 
 Experience = namedtuple('Experience', ('time_states', 'spreads'))
+
+if __name__ == "__main__":
+    np.random.seed(int(time.time()))
+    server = redis.Redis("localhost")
+    server.set("spread_func_param_test", 0)
+    source = "../normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
+    start = np.random.randint(0, 200000)
+    # start = 0
+    n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    test = True
+    sum_rewards = 0
+    worker = Worker(source, "test", start, n_steps)
+    worker.run()

@@ -116,17 +116,17 @@ class AttentionMarketEncoder(nn.Module):
 
         return outputs
 
-class DecoderProbabilities(nn.Module):
+class Decoder(nn.Module):
 
     def __init__(self):
-        super(DecoderProbabilities, self).__init__()
+        super(Decoder, self).__init__()
         self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
         self.fc2 = nn.Linear(D_MODEL, 3)
 
     def forward(self, encoding, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), log_steps.view(-1, 1)], 1)
         x = F.leaky_relu(self.fc1(x)) + encoding
-        x = F.softmax(self.fc2(x), dim=1)
+        x = self.fc2(x)
         return x
 
 
