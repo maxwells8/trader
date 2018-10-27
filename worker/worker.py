@@ -19,10 +19,6 @@ import math
 torch.set_default_tensor_type(torch.FloatTensor)
 torch.set_num_threads(1)
 
-"""
-the worker acts in the environment with a fixed policy for a certain amount of
-time, and it also prepares the experience for the optimizer.
-"""
 class Worker(object):
 
     def __init__(self, source, name, models_loc, start, n_steps, test=False):
@@ -30,19 +26,22 @@ class Worker(object):
         while True:
             # putting this while loop here because sometime the optimizer
             # is writing to the files and causes an exception
+            self.market_encoder = AttentionMarketEncoder()
+            self.proposer = Proposer()
+            self.actor_critic = ActorCritic()
+            self.encoder_to_others = EncoderToOthers()
             try:
                 # this is the lstm's version
                 # self.market_encoder = MarketEncoder()
                 # this is the attention version
-                self.market_encoder = AttentionMarketEncoder()
-                self.proposer = Proposer()
-                self.actor_critic = ActorCritic()
                 self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
+                self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
                 self.proposer.load_state_dict(torch.load(models_loc + 'proposer.pt'))
                 self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt'))
                 self.market_encoder = self.market_encoder.cpu()
                 self.proposer = self.proposer.cpu()
                 self.actor_critic = self.actor_critic.cpu()
+                self.encoder_to_others = self.encoder_to_others.cpu()
                 break
             except Exception:
                 pass
@@ -97,18 +96,19 @@ class Worker(object):
             mean = input_time_states[:, 0, :4].mean()
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
-            spread_ = spread_ / std
+            spread_normalized = spread_ / std
             # this is the lstm's version
             # market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu(), 'cpu')
             # this is the attention version
-            market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu())
+            market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([spread_normalized]).cpu())
             percents_in.append(percent_in_)
             spreads.append(spread_)
 
-            queried_actions = self.proposer.forward(market_encoding, torch.randn(1, 2).cpu() * self.proposed_sigma).cpu()
+            market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([percent_in_]).cpu())
+            queried_actions = self.proposer.forward(market_encoding, exploration_parameter=torch.randn(1, 2).cpu() * self.proposed_sigma).cpu()
             proposed_actions.append(queried_actions)
 
-            policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.policy_sigma)
+            policy, value = self.actor_critic.forward(market_encoding, queried_actions, sigma=self.policy_sigma)
 
             action = int(torch.multinomial(policy, 1))
             mu = policy[0, action]
@@ -118,12 +118,21 @@ class Worker(object):
             if self.test:
                 reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
                 reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
-                print("step:", i_step)
-                print("queried_actions:", queried_actions)
-                print("policy:", policy)
-                print("value:", value * reward_emsd + reward_ema)
-                print("sum rewards:", all_rewards)
-                print("normalized sum rewards:", (all_rewards - reward_ema) / (reward_emsd + 1e-9))
+                print("step: {s} \
+                \nqueried_actions: {q} \
+                \npolicy: {p} \
+                \nvalue: {v} \
+                \nrewards: {r}\n".format(s=i_step,
+                                        q=queried_actions,
+                                        p=policy,
+                                        v=value,
+                                        r=all_rewards))
+                # print("step:", i_step)
+                # print("queried_actions:", queried_actions)
+                # print("policy:", policy)
+                # print("value:", value * reward_emsd + reward_ema)
+                # print("sum rewards:", all_rewards)
+                # print("normalized sum rewards:", (all_rewards - reward_ema) / (reward_emsd + 1e-9))
 
             # adding steps_since_trade to help it learn
             if action in [0, 1]:
@@ -184,6 +193,7 @@ if __name__ == "__main__":
     start = np.random.randint(0, 200000)
     # start = 0
     n_steps = 1_000_000
+    n_steps = 7200
     # n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     test = True
     i = 1

@@ -18,11 +18,7 @@ import pickle
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-"""
-TODO:
-- either make this work with variable time_state lengths, or don't let
-them come into the experience
-"""
+
 class Optimizer(object):
 
     def __init__(self, models_loc):
@@ -56,6 +52,7 @@ class Optimizer(object):
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
+        self.forward_window = int(self.server.get("forward_window").decode("utf-8"))
         self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))], device='cuda')
         self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))], device='cuda')
 
@@ -96,7 +93,6 @@ class Optimizer(object):
             torch.save(self.optimizer.state_dict(), self.models_loc + 'optimizer.pt')
 
     def run(self):
-
         prev_reward_ema = None
         prev_reward_emsd = None
         n_experiences = 0
@@ -181,14 +177,14 @@ class Optimizer(object):
             # lstm
             # market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-1]).cuda(), spread_, 'cuda')
             # attention
-            market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-1]).cuda(), spread_)
-            proposed = self.PN.forward(market_encoding)
+            market_encoding = self.MEN.forward(time_states_)
+            proposed = self.PN.forward(market_encoding, torch.Tensor(percent_in[-1]).cuda(), spread_)
 
-            _, target_value = self.ACN_.forward(market_encoding, proposed)
+            _, target_value = self.ACN_.forward(market_encoding, proposed, torch.Tensor(percent_in[-1]).cuda(), spread_)
             proposed_loss_ = (-target_value).mean()
             proposed_loss += proposed_loss_ / self.trajectory_steps
 
-            policy, value = self.ACN.forward(market_encoding, proposed)
+            policy, value = self.ACN.forward(market_encoding, proposed, torch.Tensor(percent_in[-1]).cuda(), spread_)
             v_next = value
             v_trace = value
             values.append(value)
@@ -199,20 +195,20 @@ class Optimizer(object):
                 mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
                 std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
-                spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
+                spread_ = torch.Tensor(spread[-i]).view(-1, 1, 1).cuda() / std
                 time_states_ = time_states_.transpose(0, 1)
                 # lstm
                 # market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]), 'cuda')
                 # attention
-                market_encoding = self.MEN.forward(time_states_, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
+                market_encoding = self.MEN.forward(time_states_)
 
-                proposed = self.PN.forward(market_encoding)
+                proposed = self.PN.forward(market_encoding, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
 
-                _, target_value = self.ACN_.forward(market_encoding, proposed)
+                _, target_value = self.ACN_.forward(market_encoding, proposed, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
                 proposed_loss_ = (-target_value).mean()
                 proposed_loss += proposed_loss_ / self.trajectory_steps
 
-                policy, value = self.ACN.forward(market_encoding, proposed)
+                policy, value = self.ACN.forward(market_encoding, proposed, torch.Tensor(percent_in[-i-1]).cuda(), torch.Tensor(spread[-i-1]))
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).view(-1, 1)
 
@@ -225,25 +221,26 @@ class Optimizer(object):
                 actor_v_loss_ = actor_v_loss_.mean()
                 actor_v_loss += actor_v_loss_ / self.trajectory_steps
 
-                log_prob_buy = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.zeros(policy.size()[0], 1).long()))).cuda()
-                potential_gain_buy = torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().max(1)[0].view(-1, 1)
-                potential_gain_buy -= time_states[-i][:,:,3].cuda()
-                potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
+                if i > self.forward_window:
+                    log_prob_buy = torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.zeros(policy.size()[0], 1).long()))).cuda()
+                    potential_gain_buy = torch.cat(time_states[-i:-i+self.forward_window], dim=1)[:,:,3].cuda().max(1)[0].view(-1, 1)
+                    potential_gain_buy -= time_states[-i][:,:,3].cuda() - torch.Tensor(spread[-i]).view(-1, 1) / 2
+                    potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(len(time_states[-i:-i+self.forward_window])))
 
-                log_prob_sell = -torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.ones(policy.size()[0], 1).long()))).cuda()
-                potential_gain_sell = time_states[-i][:,:,3].cuda()
-                potential_gain_sell -= torch.cat(time_states[-i:], dim=1)[:,:,3].cuda().min(1)[0].view(-1, 1)
-                potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(len(time_states[-i:])))
+                    log_prob_sell = torch.max(torch.Tensor([-10]), torch.log(policy.gather(1, torch.ones(policy.size()[0], 1).long()))).cuda()
+                    potential_gain_sell = time_states[-i][:,:,3].cuda() + torch.Tensor(spread[-i]).view(-1, 1) / 2
+                    potential_gain_sell -= torch.cat(time_states[-i:-i+self.forward_window], dim=1)[:,:,3].cuda().min(1)[0].view(-1, 1)
+                    potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(len(time_states[-i:-i+self.forward_window])))
 
-                actor_pot_mean = potential_gain_buy.mean() + potential_gain_sell.mean()
+                    actor_pot_mean = (potential_gain_buy + potential_gain_sell) / 2
 
-                advantage_buy = potential_gain_buy - actor_pot_mean
-                advantage_sell = potential_gain_sell - actor_pot_mean
+                    advantage_buy = potential_gain_buy - actor_pot_mean
+                    advantage_sell = potential_gain_sell - actor_pot_mean
 
-                actor_pot_loss_buy = log_prob_buy * advantage_buy.detach() * proposed[:,0].view(-1, 1)
-                actor_pot_loss_sell = log_prob_sell * advantage_sell.detach() * proposed[:,1].view(-1, 1)
+                    actor_pot_loss_buy = -log_prob_buy * advantage_buy.detach() * proposed[:,0].view(-1, 1)
+                    actor_pot_loss_sell = -log_prob_sell * advantage_sell.detach() * proposed[:,1].view(-1, 1)
 
-                actor_pot_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.trajectory_steps
+                    actor_pot_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.trajectory_steps
 
                 entropy_loss_ = (policy * torch.max(torch.Tensor([-10]), torch.log(policy))).mean()
                 entropy_loss += entropy_loss_ / self.trajectory_steps
@@ -292,20 +289,20 @@ class Optimizer(object):
             actor_pot_weight = self.actor_pot_weight
             entropy_weight = self.entropy_weight
 
-            if float(proposed_loss) > 10 or float(proposed_loss) < -10:
-                proposed_loss = proposed_loss * 10 / float(proposed_loss)
-
-            if float(critic_loss) > 10 or float(critic_loss) < -10:
-                critic_loss = critic_loss * 10 / float(critic_loss)
-
-            if float(actor_v_loss) > 10 or float(actor_v_loss) < -10:
-                actor_v_loss = actor_v_loss * 10 / float(actor_v_loss)
-
-            if float(actor_pot_loss) > 10 or float(actor_pot_loss) < -10:
-                actor_pot_loss = actor_pot_loss * 10 / float(actor_pot_loss)
-
-            if float(entropy_loss) > 10 or float(entropy_loss) < -10:
-                entropy_loss = entropy_loss * 10 / float(entropy_loss)
+            # if float(proposed_loss) > 10 or float(proposed_loss) < -10:
+            #     proposed_loss = proposed_loss * 10 / float(proposed_loss)
+            #
+            # if float(critic_loss) > 10 or float(critic_loss) < -10:
+            #     critic_loss = critic_loss * 10 / float(critic_loss)
+            #
+            # if float(actor_v_loss) > 10 or float(actor_v_loss) < -10:
+            #     actor_v_loss = actor_v_loss * 10 / float(actor_v_loss)
+            #
+            # if float(actor_pot_loss) > 10 or float(actor_pot_loss) < -10:
+            #     actor_pot_loss = actor_pot_loss * 10 / float(actor_pot_loss)
+            #
+            # if float(entropy_loss) > 10 or float(entropy_loss) < -10:
+            #     entropy_loss = entropy_loss * 10 / float(entropy_loss)
 
             total_loss = proposed_loss * proposed_weight
             total_loss += critic_loss * critic_weight
@@ -353,15 +350,6 @@ class Optimizer(object):
                 self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
             except Exception:
                 print("failed to save")
-
-            if step % 1000 == 0:
-                try:
-                    torch.save(self.MEN.state_dict(), self.models_loc + "market_encoder" + "{step}".format(step=step) + ".pt")
-                    torch.save(self.PN.state_dict(), self.models_loc + "proposer" + "{step}".format(step=step) + ".pt")
-                    torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic" + "{step}".format(step=step) + ".pt")
-                    torch.save(self.optimizer.state_dict(), self.models_loc + "optimizer" + "{step}".format(step=step) + ".pt")
-                except Exception:
-                    print("failed to save")
 
             # for i, experience in enumerate(self.queued_experience):
             #     if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != len(experiences):

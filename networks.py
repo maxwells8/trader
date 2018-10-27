@@ -56,7 +56,6 @@ class AttentionMarketEncoder(nn.Module):
         super(AttentionMarketEncoder, self).__init__()
 
         self.fc_bar = nn.Linear(D_BAR, D_MODEL)
-        self.fc_in = nn.Linear(1, D_MODEL)
         self.fc_spread = nn.Linear(1, D_MODEL)
 
         self.N = 2
@@ -65,7 +64,7 @@ class AttentionMarketEncoder(nn.Module):
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
 
-        self.n_entities = WINDOW + 2
+        self.n_entities = WINDOW + 1
 
         self.WQs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
         for i, WQ in enumerate(self.WQs):
@@ -80,12 +79,11 @@ class AttentionMarketEncoder(nn.Module):
 
         self.fc_out = nn.Linear(D_MODEL, D_MODEL)
 
-        self.fc_final = nn.Linear(WINDOW + 2, 1)
+        self.fc_final = nn.Linear(WINDOW + 1, 1)
 
-    def forward(self, market_values, percent_in, spread):
+    def forward(self, market_values, spread):
 
         inputs = [F.leaky_relu(self.fc_bar(market_values.view(WINDOW, -1, D_BAR)))]
-        inputs += [F.leaky_relu(self.fc_in(percent_in.view(1, -1, 1)))]
         inputs += [F.leaky_relu(self.fc_spread(spread.view(1, -1, 1)))]
         inputs = torch.cat(inputs).transpose(0, 1)
 
@@ -117,6 +115,19 @@ class AttentionMarketEncoder(nn.Module):
         outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).squeeze()
 
         return outputs
+
+class DecoderProbabilities(nn.Module):
+
+    def __init__(self):
+        super(DecoderProbabilities, self).__init__()
+        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
+        self.fc2 = nn.Linear(D_MODEL, 3)
+
+    def forward(self, encoding, log_steps):
+        x = torch.cat([encoding.view(-1, D_MODEL), log_steps.view(-1, 1)], 1)
+        x = F.leaky_relu(self.fc1(x)) + encoding
+        x = F.softmax(self.fc2(x), dim=1)
+        return x
 
 
 class Proposer(nn.Module):
@@ -162,8 +173,8 @@ class ActorCritic(nn.Module):
 
         # changing the structure of this so that it won't immediately learn to
         # just not trade
-        # self.actor2 = nn.Linear(D_MODEL, 4)
         self.actor2 = nn.Linear(D_MODEL, 2)
+        # self.actor2 = nn.Linear(D_MODEL, 2)
 
         # self.critic1 = nn.Linear(D_MODEL, D_MODEL)
         self.critic2 = nn.Linear(D_MODEL, 1)
@@ -190,6 +201,18 @@ class ActorCritic(nn.Module):
         critic = self.critic2(x)
 
         return policy, critic
+
+
+class EncoderToOthers(nn.Module):
+
+    def __init__(self):
+        super(EncoderToOthers, self).__init__()
+        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
+
+    def forward(self, encoding, percent_in):
+        x = torch.cat([encoding.view(-1, D_MODEL), percent_in.view(-1, 1)], 1)
+        x = F.leaky_relu(self.fc1(x)) + encoding.view(-1, D_MODEL)
+        return x
 
 
 # class OrderNetwork(nn.Module):

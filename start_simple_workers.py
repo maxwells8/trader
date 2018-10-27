@@ -9,7 +9,7 @@ import numpy as np
 import time
 import random
 import networks
-from start_worker import start_worker
+from start_simple_worker import start_worker
 
 if __name__ == "__main__":
 
@@ -24,18 +24,9 @@ if __name__ == "__main__":
     "./normalized_data/DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
     ]
     source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [0, 0, 0, 0]
-    policy_sigmas = [1, 1, 1, 1]
-    spread_func_params = [0, 0, 0, 0]
-    import os
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    models_loc = dir_path + '/models/'
+    spread_func_params = list(np.arange(0, 3, 0.1))
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
-
-    if server.get("reward_ema") == None:
-        server.set("reward_ema", None)
-        server.set("reward_emsd", 0)
 
     global n_times
     n_times = 0
@@ -44,7 +35,7 @@ if __name__ == "__main__":
         # i_source = 0
         start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
         # start = 0
-        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, start, n_steps))
+        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, start, n_steps))
         process.start()
         global n_times
         n_times += 1
@@ -52,11 +43,9 @@ if __name__ == "__main__":
         return process
 
     processes = []
-    for i in range(len(proposed_sigmas)):
-        server.set("proposed_sigma_" + str(i), proposed_sigmas[i])
-        server.set("policy_sigma_" + str(i), policy_sigmas[i])
+    for i in range(len(spread_func_params)):
         server.set("spread_func_param_" + str(i), spread_func_params[i])
-        print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
+        print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
         processes.append(start_process(str(i)))
 
     while True:
@@ -64,10 +53,9 @@ if __name__ == "__main__":
             process.join(10)
             started = False
             while not started:
-                if server.llen("experience") < 16:
-                    print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
+                if server.llen("experience") < 64:
+                    print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True
                 else:
                     time.sleep(0.1)
-            print("reward ema:", server.get("reward_ema").decode("utf-8"))
