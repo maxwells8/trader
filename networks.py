@@ -7,7 +7,7 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 128
+D_MODEL = 256
 N_LSTM_LAYERS = 1
 WINDOW = 120
 # torch.cuda.manual_seed(0)
@@ -60,7 +60,7 @@ class AttentionMarketEncoder(nn.Module):
 
         self.N = 2
 
-        self.h = 8
+        self.h = 16
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
 
@@ -87,7 +87,7 @@ class AttentionMarketEncoder(nn.Module):
         inputs += [F.leaky_relu(self.fc_spread(spread.view(1, -1, 1)))]
         inputs = torch.cat(inputs).transpose(0, 1)
 
-        for _ in range(self.N):
+        for j in range(self.N):
             heads = []
             for i in range(self.h):
                 Q = self.WQs[i](inputs)
@@ -105,6 +105,7 @@ class AttentionMarketEncoder(nn.Module):
 
                 saliencies = torch.bmm(Q, K.transpose(1, 2))
                 weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
+                # print(j, weights.max(dim=2))
                 head = torch.bmm(weights, V)
                 heads.append(head)
 
@@ -116,18 +117,31 @@ class AttentionMarketEncoder(nn.Module):
 
         return outputs
 
+
 class Decoder(nn.Module):
 
     def __init__(self):
         super(Decoder, self).__init__()
-        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
-        self.fc2 = nn.Linear(D_MODEL, 3)
+        self.fc_combined = nn.Linear(D_MODEL + 1, D_MODEL)
+
+        self.fc_advantage1 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_advantage2 = nn.Linear(D_MODEL, 3)
+
+        self.fc_time1 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_time2 = nn.Linear(D_MODEL, 2)
 
     def forward(self, encoding, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), log_steps.view(-1, 1)], 1)
-        x = F.leaky_relu(self.fc1(x)) + encoding
-        x = self.fc2(x)
-        return x
+        x = F.leaky_relu(self.fc_combined(x)) + encoding
+
+        advantage = F.leaky_relu(self.fc_advantage1(x)) + x
+        advantage = self.fc_advantage2(advantage)
+        advantage = advantage - torch.mean(advantage, 1).view(-1, 1)
+
+        time = F.leaky_relu(self.fc_time1(x)) + x
+        time = torch.exp(self.fc_time2(x))
+
+        return advantage, time
 
 
 class Proposer(nn.Module):
