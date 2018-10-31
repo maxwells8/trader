@@ -51,10 +51,10 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            process.join(10)
+            process.join(30)
             started = False
             while not started:
-                if server.llen("experience") < 16:
+                if server.llen("experience") < 64:
                     print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True

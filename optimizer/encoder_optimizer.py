@@ -51,8 +51,9 @@ class Optimizer(object):
         self.advantage_weight = float(self.server.get("advantage_weight").decode("utf-8"))
         self.time_weight = float(self.server.get("time_weight").decode("utf-8"))
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
-
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
+        self.samples_per_trajectory = int(self.server.get("samples_per_trajectory").decode("utf-8"))
+
         self.window = networks.WINDOW
 
         self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
@@ -60,6 +61,9 @@ class Optimizer(object):
     def run(self):
         n_experiences = self.start_n_experiences
         step = self.start_step
+        t0 = time.time()
+        t = 0
+        t_tau = 0.01
         while True:
             # read in experience from the queue
             experiences = []
@@ -88,7 +92,10 @@ class Optimizer(object):
             advantage_loss = torch.Tensor([0])
             time_loss = torch.Tensor([0])
 
-            for i in range(1, self.trajectory_steps):
+            samples = np.random.choice(np.arange(1, self.trajectory_steps), self.samples_per_trajectory)
+            samples.sort()
+
+            for i in samples[::-1]:
                 time_states_ = torch.cat(time_states[-self.window-i:-i], dim=1).cuda()
                 mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
                 std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
@@ -142,8 +149,8 @@ class Optimizer(object):
                 time_loss_buy = F.l1_loss(time_[:, 0].view(-1, 1), buy_max[1].float().view(-1, 1))
                 time_loss_sell = F.l1_loss(time_[:, 1].view(-1, 1), sell_max[1].float().view(-1, 1))
 
-                advantage_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.trajectory_steps
-                time_loss += (time_loss_buy.mean() + time_loss_sell.mean()) / self.trajectory_steps
+                advantage_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.samples_per_trajectory
+                time_loss += (time_loss_buy.mean() + time_loss_sell.mean()) / self.samples_per_trajectory
 
             total_loss = (self.advantage_weight * advantage_loss) + (self.time_weight * time_loss)
 
@@ -153,7 +160,7 @@ class Optimizer(object):
 
             step += 1
 
-            print("n experiences: {n}, steps: {s}".format(n=n_experiences, s=step))
+            print("n samples: {n}, steps: {s}, time ema: {t}".format(n=n_experiences * self.samples_per_trajectory, s=step, t=t))
             print("advantage_loss: {a}, time_loss: {t}".format(a=advantage_loss, t=time_loss))
 
             try:
@@ -167,3 +174,6 @@ class Optimizer(object):
                 torch.save(cur_state, self.models_loc + 'encoder_train.pt')
             except Exception:
                 print("failed to save")
+
+            t = (time.time() - t0) * t_tau + t * (1 - t_tau)
+            t0 = time.time()

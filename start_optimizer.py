@@ -8,7 +8,7 @@ import encoder_optimizer
 
 server = redis.Redis("localhost")
 
-server.set("trajectory_steps", 120)
+server.set("trajectory_steps", 240)
 # server.set("forward_window", 15)
 # server.set("gamma", 0.99)
 #
@@ -39,7 +39,8 @@ server.set("weight_penalty", 0.01)
 server.set("learning_rate", 0.0001)
 
 # server.set("prioritized_batch_size", 0)
-server.set("queued_batch_size", 2)
+server.set("queued_batch_size", 8)
+server.set("samples_per_trajectory", 16)
 
 # server.set("reward_tau", 0.0001)
 
