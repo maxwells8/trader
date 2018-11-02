@@ -256,7 +256,7 @@ if __name__ == "__main__":
             market_encoding = ME.forward(input_time_states, torch.Tensor([spread_normalized]).cpu())
             v.append(env.value)
             if step % time_horizon == 0:
-                advantages_, time_ = DE.forward(market_encoding, torch.Tensor([float(time_horizon)]).log())
+                advantages_ = DE.forward(market_encoding, torch.Tensor([float(time_horizon)]).log())
                 # print("time_horizon:", time_horizon, "advantages_:", advantages_)
                 # print(advantages_)
                 action = int(torch.max(advantages_.squeeze(), 0)[1])

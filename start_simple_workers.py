@@ -54,7 +54,7 @@ if __name__ == "__main__":
             process.join(30)
             started = False
             while not started:
-                if server.llen("experience") < 64:
+                if server.llen("experience") < 256:
                     print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
                     processes[i] = start_process(str(i))
                     started = True

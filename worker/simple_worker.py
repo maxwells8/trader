@@ -39,14 +39,7 @@ class Worker(object):
         time_states = time_states_
         t0 = time.time()
         for i_step in range(self.n_steps):
-            for time_state in time_states:
-                for time_state_ in time_state.squeeze():
-                    try:
-                        float(time_state_)
-                        assert not np.isnan(time_state_)
-                    except Exception:
-                        raise ValueError("Incorrect value in time state: " + str(time_state_))
-
+            
             spreads.append(spread_)
 
             self.environment.step([4])

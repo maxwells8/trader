@@ -82,7 +82,6 @@ class AttentionMarketEncoder(nn.Module):
         self.fc_final = nn.Linear(WINDOW + 1, 1)
 
     def forward(self, market_values, spread):
-
         inputs = [F.leaky_relu(self.fc_bar(market_values.view(WINDOW, -1, D_BAR)))]
         inputs += [F.leaky_relu(self.fc_spread(spread.view(1, -1, 1)))]
         inputs = torch.cat(inputs).transpose(0, 1)
@@ -114,7 +113,6 @@ class AttentionMarketEncoder(nn.Module):
             inputs = outputs
 
         outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).squeeze()
-
         return outputs
 
 
@@ -122,26 +120,20 @@ class Decoder(nn.Module):
 
     def __init__(self):
         super(Decoder, self).__init__()
-        self.fc_combined = nn.Linear(D_MODEL + 1, D_MODEL)
-
-        self.fc_advantage1 = nn.Linear(D_MODEL, D_MODEL)
-        self.fc_advantage2 = nn.Linear(D_MODEL, 3)
-
-        self.fc_time1 = nn.Linear(D_MODEL, D_MODEL)
-        self.fc_time2 = nn.Linear(D_MODEL, 2)
+        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
+        self.fc2 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc3 = nn.Linear(D_MODEL, 3)
 
     def forward(self, encoding, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), log_steps.view(-1, 1)], 1)
-        x = F.leaky_relu(self.fc_combined(x)) + encoding
 
-        advantage = F.leaky_relu(self.fc_advantage1(x)) + x
-        advantage = self.fc_advantage2(advantage)
-        advantage = advantage - torch.mean(advantage, 1).view(-1, 1)
+        x = F.leaky_relu(self.fc1(x)) + encoding
+        x = F.leaky_relu(self.fc2(x)) + x
+        x = self.fc3(x)
 
-        time = F.leaky_relu(self.fc_time1(x)) + x
-        time = torch.exp(self.fc_time2(x))
+        advantage = x - torch.mean(x, 1).view(-1, 1)
 
-        return advantage, time
+        return advantage
 
 
 class Proposer(nn.Module):
