@@ -33,7 +33,6 @@ server.set("trajectory_steps", 180)
 # server.set("actor_pot_weight", 1)
 # server.set("entropy_weight", 0.1)
 server.set("advantage_weight", 1)
-server.set("time_weight", 1)
 server.set("weight_penalty", 0.01)
 
 server.set("learning_rate", 0.001)

@@ -49,7 +49,6 @@ class Optimizer(object):
             torch.save(cur_state, self.models_loc + 'encoder_train.pt')
 
         self.advantage_weight = float(self.server.get("advantage_weight").decode("utf-8"))
-        self.time_weight = float(self.server.get("time_weight").decode("utf-8"))
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
         self.samples_per_trajectory = int(self.server.get("samples_per_trajectory").decode("utf-8"))
@@ -112,13 +111,13 @@ class Optimizer(object):
                 advantage_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
 
                 future_value = time_states[sample_start][:,:,3].cuda()
-                potential_gain_buy = future_value.clone()
-                potential_gain_buy -= time_states[-i][:,:,3].cuda()
+                potential_gain_buy = time_states[-i][:,:,3].cuda()
+                potential_gain_buy -= future_value
                 potential_gain_buy -= torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(i))
 
-                potential_gain_sell = time_states[-i][:,:,3].cuda()
-                potential_gain_sell -= future_value
+                potential_gain_sell = future_value.clone()
+                potential_gain_sell -= time_states[-i][:,:,3].cuda()
                 potential_gain_sell -= torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(i))
 
@@ -137,6 +136,12 @@ class Optimizer(object):
                 advantage_stay = potential_gain_stay - actor_pot_mean
 
                 normalization_factor = (potential_gain_buy.abs() + potential_gain_sell.abs() + potential_gain_stay.abs()) + 1e-6
+
+                # print(normalization_factor)
+                # print(potential_gain_buy, advantage_buy / normalization_factor)
+                # print(potential_gain_sell, advantage_sell / normalization_factor)
+                # print(potential_gain_stay, advantage_stay / normalization_factor)
+                # print()
 
                 # print(i)
                 # print(advantage_[:, 0].view(-1, 1), advantage_buy / normalization_factor)
@@ -166,7 +171,7 @@ class Optimizer(object):
                         min_true = True
                     if max_true and min_true:
                         total_right += 1
-
+                # print(total_right / self.batch_size)
                 mean_right_percent += (total_right / self.batch_size) / self.samples_per_trajectory
 
             assert torch.isnan(total_loss).sum() == 0
@@ -176,8 +181,8 @@ class Optimizer(object):
             step += 1
             n_samples += n_experiences * self.samples_per_trajectory
 
-            print("n samples: {n}, steps: {s}, time ema: {t}".format(n=n_samples, s=step, t=t))
-            print("total_loss: {t}, correct_order_ema:, {c}".format(t=total_loss, c=correct_order))
+            print("n samples: {n}, steps: {s}, time ema: {t}".format(n=n_samples, s=step, t=round(t, 5)))
+            print("total_loss: {t}, correct_order_ema:, {c}".format(t=round(float(total_loss), 5), c=round(correct_order, 5)))
 
             try:
                 torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")

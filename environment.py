@@ -239,10 +239,10 @@ if __name__ == "__main__":
     ]
     xs = []
     ys = []
-    start = 0
+    start = 150000
     n_steps = 1_000_000
-    spread_func_param = 1.5
-    time_horizon = 90
+    spread_func_param = 0
+    time_horizon = 30
     window = networks.WINDOW
     envs = [Env(source, start, n_steps, spread_func_param, window, get_time=True) for source in sources]
 
@@ -263,11 +263,12 @@ if __name__ == "__main__":
                 print("time_horizon:", time_horizon, "advantages_:", advantages_)
                 # print(advantages_)
                 action = int(torch.max(advantages_.squeeze(), 0)[1])
-
                 if action in [0, 1]:
-                    quantity = min(float(advantages_[0, action]), 1)
-                    # quantity = 1
-                    env.step([action, quantity])
+                    # quantity = min(float(advantages_[0, action]), 1)
+                    quantity = 1
+                    # env.step([action, quantity])
+                    env.step([int(not action), quantity])
+
                 else:
                     env.step([action])
             else:
