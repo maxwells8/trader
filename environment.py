@@ -221,10 +221,12 @@ class TimeState(object):
 if __name__ == "__main__":
     np.random.seed(int(time.time()))
     import networks
+
     ME = networks.AttentionMarketEncoder()
     DE = networks.Decoder()
     ME.load_state_dict(torch.load('./models/market_encoder.pt'))
     DE.load_state_dict(torch.load('./models/decoder.pt'))
+
     sources = [
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
@@ -239,8 +241,8 @@ if __name__ == "__main__":
     ys = []
     start = 0
     n_steps = 1_000_000
-    spread_func_param = 0
-    time_horizon = 60
+    spread_func_param = 1.5
+    time_horizon = 90
     window = networks.WINDOW
     envs = [Env(source, start, n_steps, spread_func_param, window, get_time=True) for source in sources]
 
@@ -253,17 +255,18 @@ if __name__ == "__main__":
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
             spread_normalized = spread / std
-            market_encoding = ME.forward(input_time_states, torch.Tensor([spread_normalized]).cpu())
+
+            market_encoding = ME.forward(input_time_states)
             v.append(env.value)
             if step % time_horizon == 0:
-                advantages_ = DE.forward(market_encoding, torch.Tensor([float(time_horizon)]).log())
-                # print("time_horizon:", time_horizon, "advantages_:", advantages_)
+                advantages_ = DE.forward(market_encoding, torch.Tensor([spread_normalized]).cpu(), torch.Tensor([float(time_horizon)]).log())
+                print("time_horizon:", time_horizon, "advantages_:", advantages_)
                 # print(advantages_)
                 action = int(torch.max(advantages_.squeeze(), 0)[1])
 
                 if action in [0, 1]:
-                    # quantity = float(input("quantity: "))
-                    quantity = 1
+                    quantity = min(float(advantages_[0, action]), 1)
+                    # quantity = 1
                     env.step([action, quantity])
                 else:
                     env.step([action])
