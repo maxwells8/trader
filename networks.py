@@ -177,7 +177,7 @@ class ActorCritic(nn.Module):
 
         # changing the structure of this so that it won't immediately learn to
         # just not trade
-        self.actor2 = nn.Linear(D_MODEL, 2)
+        self.actor2 = nn.Linear(D_MODEL, 4)
         # self.actor2 = nn.Linear(D_MODEL, 2)
 
         # self.critic1 = nn.Linear(D_MODEL, D_MODEL)
@@ -211,10 +211,10 @@ class EncoderToOthers(nn.Module):
 
     def __init__(self):
         super(EncoderToOthers, self).__init__()
-        self.fc1 = nn.Linear(D_MODEL + 1, D_MODEL)
+        self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
 
-    def forward(self, encoding, percent_in):
-        x = torch.cat([encoding.view(-1, D_MODEL), percent_in.view(-1, 1)], 1)
+    def forward(self, encoding, spread, percent_in):
+        x = torch.cat([encoding.view(-1, D_MODEL), spread.view(-1, 1), percent_in.view(-1, 1)], 1)
         x = F.leaky_relu(self.fc1(x)) + encoding.view(-1, D_MODEL)
         return x
 

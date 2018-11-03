@@ -228,10 +228,10 @@ if __name__ == "__main__":
     DE.load_state_dict(torch.load('./models/decoder.pt'))
 
     sources = [
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
-    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
+    # "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
+    # "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
+    # "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
+    # "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
     "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
@@ -239,10 +239,10 @@ if __name__ == "__main__":
     ]
     xs = []
     ys = []
-    start = 150000
+    start = np.random.randint(0, 300000)
     n_steps = 1_000_000
-    spread_func_param = 0
-    time_horizon = 30
+    spread_func_param = 1.5
+    time_horizon = 15
     window = networks.WINDOW
     envs = [Env(source, start, n_steps, spread_func_param, window, get_time=True) for source in sources]
 
@@ -255,6 +255,7 @@ if __name__ == "__main__":
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
             spread_normalized = spread / std
+            # spread_normalized = 0.0005 / std
 
             market_encoding = ME.forward(input_time_states)
             v.append(env.value)
@@ -264,10 +265,9 @@ if __name__ == "__main__":
                 # print(advantages_)
                 action = int(torch.max(advantages_.squeeze(), 0)[1])
                 if action in [0, 1]:
-                    # quantity = min(float(advantages_[0, action]), 1)
-                    quantity = 1
-                    # env.step([action, quantity])
-                    env.step([int(not action), quantity])
+                    quantity = min(float(advantages_[0, action]), 1)
+                    # quantity = 1
+                    env.step([action, quantity])
 
                 else:
                     env.step([action])

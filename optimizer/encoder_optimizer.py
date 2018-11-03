@@ -42,9 +42,9 @@ class Optimizer(object):
             self.start_n_samples = 0
             self.start_step = 0
             cur_state = {
-            'n_samples':self.start_n_samples,
-            'steps':self.start_step,
-            'optimizer':self.optimizer.state_dict()
+                'n_samples':self.start_n_samples,
+                'steps':self.start_step,
+                'optimizer':self.optimizer.state_dict()
             }
             torch.save(cur_state, self.models_loc + 'encoder_train.pt')
 
@@ -181,8 +181,7 @@ class Optimizer(object):
             step += 1
             n_samples += n_experiences * self.samples_per_trajectory
 
-            print("n samples: {n}, steps: {s}, time ema: {t}".format(n=n_samples, s=step, t=round(t, 5)))
-            print("total_loss: {t}, correct_order_ema:, {c}".format(t=round(float(total_loss), 5), c=round(correct_order, 5)))
+            print("n samples: {n}, steps: {s}, time ema: {t}, total_loss: {l}, correct_order_ema:, {c}".format(n=n_samples, s=step, t=round(t, 5), l=round(float(total_loss), 5), c=round(correct_order, 5)))
 
             try:
                 torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")

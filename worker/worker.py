@@ -27,6 +27,7 @@ class Worker(object):
             # putting this while loop here because sometime the optimizer
             # is writing to the files and causes an exception
             self.market_encoder = AttentionMarketEncoder()
+            self.encoder_to_others = EncoderToOthers()
             self.proposer = Proposer()
             self.actor_critic = ActorCritic()
             self.encoder_to_others = EncoderToOthers()
@@ -100,11 +101,11 @@ class Worker(object):
             # this is the lstm's version
             # market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu(), 'cpu')
             # this is the attention version
-            market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([spread_normalized]).cpu())
+            market_encoding = self.market_encoder.forward(input_time_states)
             percents_in.append(percent_in_)
             spreads.append(spread_)
 
-            market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([percent_in_]).cpu())
+            market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([spread_normalized]).cpu(), torch.Tensor([percent_in_]).cpu())
             queried_actions = self.proposer.forward(market_encoding, exploration_parameter=torch.randn(1, 2).cpu() * self.proposed_sigma).cpu()
             proposed_actions.append(queried_actions)
 
