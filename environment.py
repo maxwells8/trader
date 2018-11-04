@@ -97,7 +97,7 @@ class Env(object):
 
     def buy(self, amount):
         self.balance -= amount
-        self.balance -= amount * self.time_states[-1].spread / 2
+        self.balance -= amount * (self.time_states[-1].spread / 2) / self.data['close'][self.cur_i]
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i],
                           quantity=amount / self.data['close'][self.cur_i],
@@ -107,7 +107,7 @@ class Env(object):
 
     def sell(self, amount):
         self.balance -= amount
-        self.balance -= amount * self.time_states[-1].spread / 2
+        self.balance -= amount * (self.time_states[-1].spread / 2) / self.data['close'][self.cur_i]
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
                           open_price=self.data['close'][self.cur_i],
                           quantity=-amount / self.data['close'][self.cur_i],
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     xs = []
     ys = []
     start = np.random.randint(0, 300000)
-    start = 0
+    # start = 0
     n_steps = 1_000_000
     spread_func_param = 1.5
     window = networks.WINDOW
@@ -246,27 +246,37 @@ if __name__ == "__main__":
     n_profitable = [0 for _ in range(len(envs))]
     n_total = [0 for _ in range(len(envs))]
     for step in range(n_steps):
+        if step % 1000 == 0:
+            try:
+                ME.load_state_dict(torch.load('./models/market_encoder.pt'))
+                DE.load_state_dict(torch.load('./models/decoder.pt'))
+            except Exception:
+                pass
         v = []
         for i, env in enumerate(envs):
-            time_states, percent_in, spread, reward = env.get_state()
-            input_time_states = torch.cat(time_states[-window:]).cpu()
-            mean = input_time_states[:, 0, :4].mean()
-            std = input_time_states[:, 0, :4].std()
-            input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
-
-            spread_normalized = spread / std
-            # spread_normalized = 0.0005 / std
-
-            market_encoding = ME.forward(input_time_states)
             v.append(env.value)
             if step % time_horizons[i] == 0:
+                time_states, percent_in, spread, reward = env.get_state()
+                input_time_states = torch.cat(time_states[-window:]).cpu()
+                mean = input_time_states[:, 0, :4].mean()
+                std = input_time_states[:, 0, :4].std()
+                input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
+
+                spread_normalized = spread / std
+                # spread_normalized = 0.0005 / std
+
+                market_encoding = ME.forward(input_time_states)
+
                 if env.value >= prev_values[i]:
                     n_profitable[i] += 1
                 n_total[i] += 1
                 time_horizons[i] = np.random.randint(1, 180)
+
                 advantages_ = DE.forward(market_encoding, torch.Tensor([spread_normalized]).cpu(), torch.Tensor([float(time_horizons[i])]).log())
                 print("time horizon:", time_horizons[i], "advantages:", advantages_.squeeze().detach().numpy(), "spread:", spread, "p_profitable:", n_profitable[i] / n_total[i])
+
                 prev_values[i] = env.value
+
                 action = int(torch.max(advantages_.squeeze(), 0)[1])
                 if action in [0, 1]:
                     # quantity = min(float(advantages_[0, action]), 1)

@@ -163,9 +163,6 @@ class Optimizer(object):
 
                 total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.samples_per_trajectory
 
-                n_max = 0
-                n_min = 0
-                total_right = 0
                 correct_order = False
                 value = 0
                 for j in range(self.batch_size):
@@ -186,23 +183,17 @@ class Optimizer(object):
                     max_true = False
                     min_true = False
                     if np.argmax(guesses) == np.argmax(targets):
-                        n_max += 1
                         max_true = True
                     if np.argmin(guesses) == np.argmin(targets):
-                        n_min += 1
                         min_true = True
                     if max_true and min_true:
                         correct_order = True
-                        total_right += 1
-                    else:
-                        correct_order = False
 
                     if correct_order_mean == 0:
                         correct_order_mean = float(correct_order)
 
                     correct_order_mean = (correct_order_tau * correct_order) + (1 - correct_order_tau) * correct_order_mean
 
-                # print(total_right / self.batch_size)
 
             if loss_ema == 0:
                 loss_ema = float(total_loss)
