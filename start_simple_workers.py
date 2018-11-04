@@ -30,12 +30,7 @@ if __name__ == "__main__":
 
     global n_times
     n_times = 0
-    def start_process(name):
-        i_source = random.randint(0, 7)
-        i_source = 0
-        start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
-        # start = 0
-        # start = random.randint(0, 10)
+    def start_process(name, i_source, start):
         process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, start, n_steps))
         process.start()
         global n_times
@@ -46,8 +41,13 @@ if __name__ == "__main__":
     processes = []
     for i in range(len(spread_func_params)):
         server.set("spread_func_param_" + str(i), spread_func_params[i])
-        print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
-        processes.append(start_process(str(i)))
+        i_source = random.randint(0, 7)
+        # i_source = 0
+        start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
+        # start = 0
+        # start = random.randint(0, 10)
+        print("starting worker {worker}: spread param={param}, source: {i_source}, start: {start}".format(worker=i, param=round(spread_func_params[i], 5), i_source=i_source, start=start))
+        processes.append(start_process(str(i), i_source, start))
 
     while True:
         for i, process in enumerate(processes):
@@ -55,8 +55,13 @@ if __name__ == "__main__":
             started = False
             while not started:
                 if server.llen("experience") < 256:
-                    print("starting worker {worker}: spread param={param}".format(worker=i, param=spread_func_params[i]))
-                    processes[i] = start_process(str(i))
+                    i_source = random.randint(0, 7)
+                    # i_source = 0
+                    start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
+                    # start = 0
+                    # start = random.randint(0, 10)
+                    print("starting worker {worker}: spread param={param}, source: {i_source}, start: {start}".format(worker=i, param=round(spread_func_params[i], 5), i_source=i_source, start=start))
+                    processes[i] = start_process(str(i), i_source, start)
                     started = True
                 else:
                     time.sleep(0.1)

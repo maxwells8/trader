@@ -61,10 +61,19 @@ class Optimizer(object):
         n_samples = self.start_n_samples
         step = self.start_step
         t0 = time.time()
+
+        loss_ema = 0
+        loss_tau = 0.01
+
         t = 0
-        t_tau = 0.01
-        correct_order = 0
-        correct_order_tau = 0.01
+        t_tau = 0.1
+
+        correct_order_tau = 0.0001
+        correct_order_mean = 0
+        correct_order_std = 0
+
+        value_tau = 0.0001
+        value_ema = 0
         while True:
             n_experiences = 0
             # read in experience from the queue
@@ -96,11 +105,10 @@ class Optimizer(object):
             samples = np.random.choice(np.arange(1, self.trajectory_steps), self.samples_per_trajectory)
             samples.sort()
 
-            mean_right_percent = 0
             for i in samples[::-1]:
                 sample_start = np.random.randint(self.window, self.window + self.trajectory_steps - i)
 
-                time_states_ = torch.cat(time_states[sample_start-self.window:sample_start], dim=1).cuda()
+                time_states_ = torch.cat(time_states[sample_start-self.window:sample_start], dim=1).clone().cuda()
                 mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
                 std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
@@ -111,7 +119,7 @@ class Optimizer(object):
                 advantage_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
 
                 future_value = time_states[sample_start][:,:,3].cuda()
-                potential_gain_buy = time_states[-i][:,:,3].cuda()
+                potential_gain_buy = time_states[-i][:,:,3].clone().cuda()
                 potential_gain_buy -= future_value
                 potential_gain_buy -= torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(i))
@@ -158,9 +166,23 @@ class Optimizer(object):
                 n_max = 0
                 n_min = 0
                 total_right = 0
+                correct_order = False
+                value = 0
                 for j in range(self.batch_size):
                     guesses = [float(advantage_[j, 0]), float(advantage_[j, 1]), float(advantage_[j, 2])]
                     targets = [float(advantage_buy[j, 0]), float(advantage_sell[j, 0]), float(advantage_stay[j, 0])]
+
+                    if np.argmax(guesses) == 0:
+                        value = float(potential_gain_buy[j] * (std.view(-1)[j] * math.sqrt(i)))
+                    elif np.argmax(guesses) == 1:
+                        value = float(potential_gain_sell[j] * (std.view(-1)[j] * math.sqrt(i)))
+                    else:
+                        value = 0
+
+                    if value_ema == 0:
+                        value_ema = value
+                    value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
+
                     max_true = False
                     min_true = False
                     if np.argmax(guesses) == np.argmax(targets):
@@ -170,9 +192,22 @@ class Optimizer(object):
                         n_min += 1
                         min_true = True
                     if max_true and min_true:
+                        correct_order = True
                         total_right += 1
+                    else:
+                        correct_order = False
+
+                    if correct_order_mean == 0:
+                        correct_order_mean = float(correct_order)
+
+                    correct_order_mean = (correct_order_tau * correct_order) + (1 - correct_order_tau) * correct_order_mean
+
                 # print(total_right / self.batch_size)
-                mean_right_percent += (total_right / self.batch_size) / self.samples_per_trajectory
+
+            if loss_ema == 0:
+                loss_ema = float(total_loss)
+            else:
+                loss_ema = float(total_loss) * loss_tau + (loss_ema) * (1 - loss_tau)
 
             assert torch.isnan(total_loss).sum() == 0
             total_loss.backward()
@@ -181,7 +216,7 @@ class Optimizer(object):
             step += 1
             n_samples += n_experiences * self.samples_per_trajectory
 
-            print("n samples: {n}, steps: {s}, time ema: {t}, total_loss: {l}, correct_order_ema:, {c}".format(n=n_samples, s=step, t=round(t, 5), l=round(float(total_loss), 5), c=round(correct_order, 5)))
+            print("n samples: {n}, steps: {s}, time ema: {t}, loss ema: {l}, gain ema: {v}, correct order ema: {c}".format(n=n_samples, s=step, t=round(t, 5), l=round(loss_ema, 5), v=round(value_ema, 8), c=round(correct_order_mean, 5)))
 
             try:
                 torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")
@@ -199,7 +234,3 @@ class Optimizer(object):
                 t = time.time() - t0
             t = (time.time() - t0) * t_tau + t * (1 - t_tau)
             t0 = time.time()
-
-            if correct_order == 0:
-                correct_order = mean_right_percent
-            correct_order = (mean_right_percent * correct_order_tau) + (correct_order * (1 - correct_order_tau))

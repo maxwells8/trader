@@ -39,16 +39,11 @@ class Optimizer(object):
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
             self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
         except FileNotFoundError:
-            # this is the lstm's version
-            # self.MEN = MarketEncoder().cuda()
-            # this is the attention version
-            self.MEN = AttentionMarketEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.PN = Proposer().cuda()
             self.ACN = ActorCritic().cuda()
             self.ACN_ = ActorCritic().cuda()
 
-            torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
             torch.save(self.PN.state_dict(), self.models_loc + 'proposer.pt')
             torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
