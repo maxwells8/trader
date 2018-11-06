@@ -74,6 +74,7 @@ class Optimizer(object):
 
         value_tau = 0.0001
         value_ema = 0
+
         while True:
             n_experiences = 0
             # read in experience from the queue
@@ -132,9 +133,8 @@ class Optimizer(object):
                 potential_gain_stay = torch.zeros_like(potential_gain_buy)
 
                 # print(i)
-                # print(potential_gain_buy)
-                # print(potential_gain_sell)
-                # print(potential_gain_stay)
+                # print(potential_gain_buy * (std.view(-1, 1) * math.sqrt(i)))
+                # print(potential_gain_sell * (std.view(-1, 1) * math.sqrt(i)))
                 # print()
 
                 actor_pot_mean = (potential_gain_buy + potential_gain_sell + potential_gain_stay) / 3
@@ -188,9 +188,6 @@ class Optimizer(object):
                         min_true = True
                     if max_true and min_true:
                         correct_order = True
-
-                    if correct_order_mean == 0:
-                        correct_order_mean = float(correct_order)
 
                     correct_order_mean = (correct_order_tau * correct_order) + (1 - correct_order_tau) * correct_order_mean
 

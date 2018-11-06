@@ -38,7 +38,7 @@ server.set("learning_rate", 0.001)
 
 server.set("prioritized_batch_size", 0)
 server.set("queued_batch_size", 16)
-server.set("queued_batch_size", 32)
+server.set("queued_batch_size", 8)
 
 server.set("samples_per_trajectory", 20)
 

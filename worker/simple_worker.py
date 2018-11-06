@@ -9,6 +9,7 @@ import networks
 import pickle
 import redis
 import math
+from zeus.zeus import Zeus
 
 # np.random.seed(0)
 # torch.manual_seed(0)
@@ -17,57 +18,35 @@ torch.set_num_threads(1)
 
 class Worker(object):
 
-    def __init__(self, source, name, start, n_steps):
+    def __init__(self, instrument, granularity, start, n_steps):
 
         self.server = redis.Redis("localhost")
-        self.name = name
-        self.spread_func_param = float(self.server.get("spread_func_param_" + name).decode("utf-8"))
+        self.zeus = Zeus(instrument, granularity)
 
         self.window = networks.WINDOW
+        self.start = start
         self.n_steps = n_steps
 
-        self.environment = Env(source, start, n_steps, self.spread_func_param, self.window, get_time=True)
+        self.time_states = []
+        self.spreads = []
+
+    def add_bar(self, bar):
+        time_ = (len(self.time_states) - (self.n_steps / 2)) / (self.n_steps / 2)
+        time_state = torch.Tensor([bar.open, bar.high, bar.low, bar.close, time_]).view(1, 1, -1)
+        self.time_states.append(time_state)
+        self.spreads.append(bar.spread)
 
     def run(self):
-        all_rewards = 0
-
-        time_states = []
-        spreads = []
-
-        state = self.environment.get_state()
-        time_states_, _, spread_, _ = state
-        time_states = time_states_
         t0 = time.time()
-        for i_step in range(self.n_steps):
-            
-            spreads.append(spread_)
 
-            self.environment.step([4])
+        while len(self.time_states) != self.n_steps + self.window:
+            n_seconds = (self.n_steps + self.window - len(self.time_states)) * 60
+            self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
+            self.start += n_seconds
 
-            state = self.environment.get_state()
-            if not state:
-                break
-
-            time_states_, _, spread_, _ = state
-
-            time_states.append(time_states_[-1])
-
-        experience = Experience(time_states, spreads)
+        experience = Experience(self.time_states, self.spreads)
         self.server.rpush("experience", pickle.dumps(experience, protocol=pickle.HIGHEST_PROTOCOL))
 
-        print("name: {name}, steps: {steps}, time: {time}".format(name=self.name, steps=i_step, time=time.time()-t0))
+        print("steps: {steps}, time: {time}".format(steps=self.n_steps, time=time.time()-t0))
 
 Experience = namedtuple('Experience', ('time_states', 'spreads'))
-
-if __name__ == "__main__":
-    np.random.seed(int(time.time()))
-    server = redis.Redis("localhost")
-    server.set("spread_func_param_test", 0)
-    source = "../normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv"
-    start = np.random.randint(0, 200000)
-    # start = 0
-    n_steps = int(server.get("trajectory_steps").decode("utf-8"))
-    test = True
-    sum_rewards = 0
-    worker = Worker(source, "test", start, n_steps)
-    worker.run()

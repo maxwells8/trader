@@ -13,41 +13,26 @@ from start_simple_worker import start_worker
 
 if __name__ == "__main__":
 
-    sources = [
-    "./normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
-    ]
-    source_lengths = [len(pd.read_csv(source)) for source in sources]
-    spread_func_params = list(np.arange(0, 3, 0.1))
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    n_workers = 32
 
-    global n_times
     n_times = 0
-    def start_process(name, i_source, start):
-        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, start, n_steps))
-        process.start()
+    def start_process():
         global n_times
+        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD"])
+        granularity = "M1"
+        # pick a time since 2006, because the volume is too small earlier
+        start = np.random.randint(1136073600, int(time.time()) - (60 * (n_steps + networks.WINDOW)))
+        print("starting worker {worker}... instrument: {instrument}, granularity: {gran}, start: {start}".format(worker=n_times,instrument=instrument, gran=granularity, start=start))
+        process = multiprocessing.Process(target=start_worker, args=(instrument, granularity, start, n_steps))
+        process.start()
         n_times += 1
-        print("number of trajectories:", n_times)
         return process
 
     processes = []
-    for i in range(len(spread_func_params)):
-        server.set("spread_func_param_" + str(i), spread_func_params[i])
-        i_source = random.randint(0, 7)
-        # i_source = 0
-        start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
-        # start = 0
-        # start = random.randint(0, 10)
-        print("starting worker {worker}: spread param={param}, source: {i_source}, start: {start}".format(worker=i, param=round(spread_func_params[i], 5), i_source=i_source, start=start))
-        processes.append(start_process(str(i), i_source, start))
+    for i in range(n_workers):
+        processes.append(start_process())
 
     while True:
         for i, process in enumerate(processes):
@@ -55,13 +40,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 if server.llen("experience") < 256:
-                    i_source = random.randint(0, 7)
-                    # i_source = 0
-                    start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
-                    # start = 0
-                    # start = random.randint(0, 10)
-                    print("starting worker {worker}: spread param={param}, source: {i_source}, start: {start}".format(worker=i, param=round(spread_func_params[i], 5), i_source=i_source, start=start))
-                    processes[i] = start_process(str(i), i_source, start)
+                    processes[i] = start_process()
                     started = True
                 else:
                     time.sleep(0.1)
