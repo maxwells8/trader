@@ -29,6 +29,10 @@ class Optimizer(object):
         self.encoder = AttentionMarketEncoder().cuda()
         self.decoder = Decoder().cuda()
         self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
+        self.start_n_samples = 0
+        self.start_step = 0
+        self.start_correct_order_mean = 0
+        self.start_value_ema = 0
         try:
             self.encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
             self.decoder.load_state_dict(torch.load(self.models_loc + 'decoder.pt'))
@@ -36,14 +40,20 @@ class Optimizer(object):
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
-        except FileNotFoundError:
+            self.start_correct_order_mean = checkpoint['correct_order_mean']
+            self.start_value_ema = checkpoint['value_ema']
+        except Exception:
             torch.save(self.encoder.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.decoder.state_dict(), self.models_loc + 'decoder.pt')
             self.start_n_samples = 0
             self.start_step = 0
+            self.start_correct_order_mean = 0
+            self.start_value_ema = 0
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
+                'correct_order_mean':self.start_correct_order_mean,
+                'value_ema':self.start_value_ema,
                 'optimizer':self.optimizer.state_dict()
             }
             torch.save(cur_state, self.models_loc + 'encoder_train.pt')
@@ -68,12 +78,11 @@ class Optimizer(object):
         t = 0
         t_tau = 0.1
 
-        correct_order_tau = 0.0001
-        correct_order_mean = 0
-        correct_order_std = 0
+        correct_order_tau = 0.00001
+        correct_order_mean = self.start_correct_order_mean
 
-        value_tau = 0.0001
-        value_ema = 0
+        value_tau = 0.00001
+        value_ema = self.start_value_ema
 
         while True:
             n_experiences = 0
@@ -109,7 +118,9 @@ class Optimizer(object):
             for i in samples[::-1]:
                 sample_start = np.random.randint(self.window, self.window + self.trajectory_steps - i)
 
-                time_states_ = torch.cat(time_states[sample_start-self.window:sample_start], dim=1).clone().cuda()
+                time_states_ = time_states[sample_start-self.window:sample_start]
+
+                time_states_ = torch.cat(time_states_, dim=1).clone().cuda()
                 mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
                 std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
@@ -212,6 +223,8 @@ class Optimizer(object):
                 cur_state = {
                     'n_samples':n_samples,
                     'steps':step,
+                    'correct_order_mean':correct_order_mean,
+                    'value_ema':value_ema,
                     'optimizer':self.optimizer.state_dict()
                 }
                 torch.save(cur_state, self.models_loc + 'encoder_train.pt')

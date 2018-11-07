@@ -52,8 +52,9 @@ class AttentionMarketEncoder(nn.Module):
         of entities, but should add to its ability to learn.
     """
 
-    def __init__(self):
+    def __init__(self, device='cuda'):
         super(AttentionMarketEncoder, self).__init__()
+        self.device = device
 
         self.fc_bar = nn.Linear(D_BAR, D_MODEL)
 
@@ -81,7 +82,15 @@ class AttentionMarketEncoder(nn.Module):
         self.fc_final = nn.Linear(WINDOW, 1)
 
     def forward(self, market_values):
-        inputs = [F.leaky_relu(self.fc_bar(market_values.view(WINDOW, -1, D_BAR)))]
+        time_states = []
+        for i, time_state in enumerate(market_values):
+            if self.device == 'cuda':
+                time_states.append(torch.cat([time_state.cuda(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cuda()], dim=1).view(1, -1, D_BAR))
+            else:
+                time_states.append(torch.cat([time_state.cpu(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cpu()], dim=1).view(1, -1, D_BAR))
+
+        time_states = torch.cat(time_states, dim=0)
+        inputs = [F.leaky_relu(self.fc_bar(time_states.view(WINDOW, -1, D_BAR)))]
         inputs = torch.cat(inputs).transpose(0, 1)
 
         for j in range(self.N):

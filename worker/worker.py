@@ -32,9 +32,6 @@ class Worker(object):
             self.actor_critic = ActorCritic()
             self.encoder_to_others = EncoderToOthers()
             try:
-                # this is the lstm's version
-                # self.market_encoder = MarketEncoder()
-                # this is the attention version
                 self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
                 self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
                 self.proposer.load_state_dict(torch.load(models_loc + 'proposer.pt'))
@@ -98,9 +95,7 @@ class Worker(object):
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
             spread_normalized = spread_ / std
-            # this is the lstm's version
-            # market_encoding = self.market_encoder.forward(input_time_states, torch.Tensor([percent_in_]).cpu(), torch.Tensor([spread_]).cpu(), 'cpu')
-            # this is the attention version
+
             market_encoding = self.market_encoder.forward(input_time_states)
             percents_in.append(percent_in_)
             spreads.append(spread_)

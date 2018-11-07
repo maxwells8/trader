@@ -31,8 +31,7 @@ class Worker(object):
         self.spreads = []
 
     def add_bar(self, bar):
-        time_ = (len(self.time_states) - (self.n_steps / 2)) / (self.n_steps / 2)
-        time_state = torch.Tensor([bar.open, bar.high, bar.low, bar.close, time_]).view(1, 1, -1)
+        time_state = torch.Tensor([bar.open, bar.high, bar.low, bar.close]).view(1, 1, -1)
         self.time_states.append(time_state)
         self.spreads.append(bar.spread)
 
