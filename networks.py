@@ -60,21 +60,15 @@ class AttentionMarketEncoder(nn.Module):
 
         self.N = 2
 
-        self.h = 16
+        self.h = 8
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
 
         self.n_entities = WINDOW
 
-        self.WQs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
-        for i, WQ in enumerate(self.WQs):
-            self.add_module("WQ" + str(i), WQ)
-        self.WKs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
-        for i, WK in enumerate(self.WKs):
-            self.add_module("WK" + str(i), WK)
-        self.WVs = [nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)]
-        for i, WV in enumerate(self.WVs):
-            self.add_module("WV" + str(i), WV)
+        self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)])
+        self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)])
+        self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)])
         self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
 
         self.fc_out = nn.Linear(D_MODEL, D_MODEL)
@@ -90,8 +84,11 @@ class AttentionMarketEncoder(nn.Module):
                 time_states.append(torch.cat([time_state.cpu(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cpu()], dim=1).view(1, -1, D_BAR))
 
         time_states = torch.cat(time_states, dim=0)
-        inputs = [F.leaky_relu(self.fc_bar(time_states.view(WINDOW, -1, D_BAR)))]
-        inputs = torch.cat(inputs).transpose(0, 1)
+        inputs_ = [F.leaky_relu(self.fc_bar(time_states.view(WINDOW, -1, D_BAR)))]
+        inputs_ = torch.cat(inputs_).transpose(0, 1)
+        inputs_mean = inputs_.mean(dim=2).view(-1, self.n_entities, 1)
+        inputs_std = inputs_.std(dim=2).view(-1, self.n_entities, 1)
+        inputs = (inputs_ - inputs_mean) / (inputs_std + 1e-9)
 
         for j in range(self.N):
             heads = []
@@ -99,17 +96,21 @@ class AttentionMarketEncoder(nn.Module):
                 Q = self.WQs[i](inputs)
                 Q_mean = Q.mean(dim=2).view(-1, self.n_entities, 1)
                 Q_std = Q.std(dim=2).view(-1, self.n_entities, 1)
-                Q = (Q - Q_mean) / Q_std
+                Q = (Q - Q_mean) / (Q_std + 1e-9)
                 K = self.WKs[i](inputs)
                 K_mean = K.mean(dim=2).view(-1, self.n_entities, 1)
                 K_std = K.std(dim=2).view(-1, self.n_entities, 1)
-                K = (K - K_mean) / K_std
+                K = (K - K_mean) / (K_std + 1e-9)
                 V = self.WVs[i](inputs)
                 V_mean = V.mean(dim=2).view(-1, self.n_entities, 1)
                 V_std = V.std(dim=2).view(-1, self.n_entities, 1)
-                V = (V - V_mean) / V_std
+                V = (V - V_mean) / (V_std + 1e-9)
+
+                # print(Q, K, V)
+                # print(Q_std.mean(), K_std.mean(), V_std.mean())
 
                 saliencies = torch.bmm(Q, K.transpose(1, 2))
+                # print(saliencies)
                 weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
                 # print(j, weights.max(dim=2))
                 head = torch.bmm(weights, V)
@@ -117,9 +118,14 @@ class AttentionMarketEncoder(nn.Module):
 
             heads = torch.cat(heads, dim=2)
             outputs = F.leaky_relu(self.fc_out(self.WO(heads))) + inputs
-            inputs = outputs
+            outputs_mean = outputs.mean(dim=2).view(-1, self.n_entities, 1)
+            outputs_std = outputs.std(dim=2).view(-1, self.n_entities, 1)
+            inputs = (outputs - outputs_mean) / (outputs_std + 1e-9)
 
-        outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).squeeze()
+        outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).view(-1, D_MODEL)
+        outputs_mean = outputs.mean(dim=1).view(-1, 1)
+        outputs_std = outputs.std(dim=1).view(-1, 1)
+        outputs = (outputs - outputs_mean) / (outputs_std + 1e-9)
         return outputs
 
 

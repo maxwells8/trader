@@ -66,7 +66,7 @@ class Worker(object):
             spread_ = torch.Tensor([spread]).view(1, 1, 1) / std
             time_states_ = time_states_.transpose(0, 1)
 
-            self.n_steps_future = np.random.randint(0, 180)
+            self.n_steps_future = np.random.randint(1, 120)
 
             market_encoding = self.market_encoder.forward(time_states_)
             advantage_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([self.n_steps_future]).log())
@@ -91,6 +91,7 @@ class Worker(object):
                 self.pos = "Stay"
             self.steps_since_trade = 0
 
+            print(advantage_)
             print(self.pos, action)
             print(self.zeus.unrealized_balance())
             print()

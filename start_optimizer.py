@@ -9,7 +9,7 @@ import encoder_optimizer
 server = redis.Redis("localhost")
 
 server.set("trajectory_steps", 32)
-server.set("trajectory_steps", 180)
+server.set("trajectory_steps", 120)
 server.set("gamma", 0.99)
 
 server.set("max_rho", 1)
@@ -34,10 +34,9 @@ server.set("entropy_weight", 0.05)
 server.set("advantage_weight", 1)
 server.set("weight_penalty", 0.01)
 
-server.set("learning_rate", 0.001)
+server.set("learning_rate", 0.0001)
 
 server.set("prioritized_batch_size", 0)
-server.set("queued_batch_size", 16)
 server.set("queued_batch_size", 8)
 
 server.set("samples_per_trajectory", 20)

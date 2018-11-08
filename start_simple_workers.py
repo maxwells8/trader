@@ -20,7 +20,7 @@ if __name__ == "__main__":
     n_times = 0
     def start_process():
         global n_times
-        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD"])
+        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
         granularity = "M1"
         # pick a time since 2006, because the volume is too small earlier
         start = np.random.randint(1136073600, int(time.time()) - (60 * (n_steps + networks.WINDOW)))

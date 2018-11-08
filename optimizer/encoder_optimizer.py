@@ -78,10 +78,10 @@ class Optimizer(object):
         t = 0
         t_tau = 0.1
 
-        correct_order_tau = 0.00001
+        correct_order_tau = 0.0001
         correct_order_mean = self.start_correct_order_mean
 
-        value_tau = 0.00001
+        value_tau = 0.0001
         value_ema = self.start_value_ema
 
         while True:
@@ -172,6 +172,11 @@ class Optimizer(object):
                 actor_pot_loss_sell = F.l1_loss(advantage_[:, 1].view(-1, 1), (advantage_sell / normalization_factor).detach())
                 actor_pot_loss_stay = F.l1_loss(advantage_[:, 2].view(-1, 1), (advantage_stay / normalization_factor).detach())
 
+                # print(actor_pot_loss_buy)
+                # print(actor_pot_loss_sell)
+                # print(actor_pot_loss_stay)
+                # print()
+
                 total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.samples_per_trajectory
 
                 correct_order = False
@@ -209,7 +214,10 @@ class Optimizer(object):
                 loss_ema = float(total_loss) * loss_tau + (loss_ema) * (1 - loss_tau)
 
             assert torch.isnan(total_loss).sum() == 0
+
             total_loss.backward()
+            # for param in self.encoder.parameters():
+            #     print(param.data)
             self.optimizer.step()
 
             step += 1
