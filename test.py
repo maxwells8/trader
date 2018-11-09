@@ -105,5 +105,5 @@ class Worker(object):
 
 
 if __name__ == "__main__":
-    worker = Worker("EUR_USD", "M1", 1440, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
+    worker = Worker("NZD_USD", "M1", 7200*1, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
     worker.run()

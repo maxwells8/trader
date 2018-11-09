@@ -76,12 +76,12 @@ class Optimizer(object):
         loss_tau = 0.01
 
         t = 0
-        t_tau = 0.05
+        t_tau = 0.01
 
-        correct_order_tau = 0.0001
+        correct_order_tau = 0.00001
         correct_order_mean = self.start_correct_order_mean
 
-        value_tau = 0.0001
+        value_tau = 0.00001
         value_ema = self.start_value_ema
 
         while True:

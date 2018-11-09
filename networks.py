@@ -58,9 +58,10 @@ class AttentionMarketEncoder(nn.Module):
 
         self.fc_bar = nn.Linear(D_BAR, D_MODEL)
 
-        self.N = 2
-
+        self.N = 6
         self.h = 8
+        self.fc_out_middle_size = D_MODEL * 2
+
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
 
@@ -71,7 +72,8 @@ class AttentionMarketEncoder(nn.Module):
         self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)])
         self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
 
-        self.fc_out = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(self.N)])
+        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(self.N)])
         self.in_gain = torch.ones(D_MODEL, requires_grad=True)
         self.in_bias = torch.zeros(D_MODEL, requires_grad=True)
 
@@ -108,10 +110,13 @@ class AttentionMarketEncoder(nn.Module):
                 heads.append(head)
 
             heads = torch.cat(heads, dim=2)
-            outputs = F.leaky_relu(self.fc_out(self.WO(heads))) + inputs
-            outputs_mean = outputs.mean(dim=2).view(-1, self.n_entities, 1)
-            outputs_std = outputs.std(dim=2).view(-1, self.n_entities, 1)
-            inputs = (outputs - outputs_mean) / (outputs_std + 1e-9)
+
+            out = F.leaky_relu(self.fc_out1[j](self.WO(heads)))
+            out = self.fc_out2[j](out) + inputs
+
+            out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+            out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+            inputs = (out - out_mean) / (out_std + 1e-9)
             inputs = inputs * self.in_gain + self.in_bias
 
         outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
