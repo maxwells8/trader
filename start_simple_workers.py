@@ -22,9 +22,12 @@ if __name__ == "__main__":
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
         granularity = "M1"
+
         # pick a time since 2006, because the volume is too small earlier
         start = np.random.randint(1136073600, int(time.time()) - (60 * (n_steps + networks.WINDOW)))
+
         print("starting worker {worker}... instrument: {instrument}, granularity: {gran}, start: {start}".format(worker=n_times,instrument=instrument, gran=granularity, start=start))
+
         process = multiprocessing.Process(target=start_worker, args=(instrument, granularity, start, n_steps))
         process.start()
         n_times += 1

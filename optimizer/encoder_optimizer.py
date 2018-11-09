@@ -76,7 +76,7 @@ class Optimizer(object):
         loss_tau = 0.01
 
         t = 0
-        t_tau = 0.1
+        t_tau = 0.05
 
         correct_order_tau = 0.0001
         correct_order_mean = self.start_correct_order_mean
@@ -109,7 +109,6 @@ class Optimizer(object):
             for i, time_state_ in enumerate(time_states):
                 time_states[i] = torch.cat(time_state_)
             spread = [*zip(*batch.spreads)]
-
             total_loss = torch.Tensor([0])
 
             samples = np.random.choice(np.arange(1, self.trajectory_steps), self.samples_per_trajectory)

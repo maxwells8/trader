@@ -32,9 +32,9 @@ server.set("critic_weight", 1)
 server.set("actor_v_weight", 1)
 server.set("entropy_weight", 0.05)
 server.set("advantage_weight", 1)
-server.set("weight_penalty", 0.01)
+server.set("weight_penalty", 0)
 
-server.set("learning_rate", 0.0001)
+server.set("learning_rate", 0.001)
 
 server.set("prioritized_batch_size", 0)
 server.set("queued_batch_size", 8)

@@ -72,6 +72,8 @@ class AttentionMarketEncoder(nn.Module):
         self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
 
         self.fc_out = nn.Linear(D_MODEL, D_MODEL)
+        self.in_gain = torch.ones(D_MODEL, requires_grad=True)
+        self.in_bias = torch.zeros(D_MODEL, requires_grad=True)
 
         self.fc_final = nn.Linear(WINDOW, 1)
 
@@ -89,28 +91,17 @@ class AttentionMarketEncoder(nn.Module):
         inputs_mean = inputs_.mean(dim=2).view(-1, self.n_entities, 1)
         inputs_std = inputs_.std(dim=2).view(-1, self.n_entities, 1)
         inputs = (inputs_ - inputs_mean) / (inputs_std + 1e-9)
+        inputs = inputs * self.in_gain + self.in_bias
 
         for j in range(self.N):
             heads = []
             for i in range(self.h):
                 Q = self.WQs[i](inputs)
-                Q_mean = Q.mean(dim=2).view(-1, self.n_entities, 1)
-                Q_std = Q.std(dim=2).view(-1, self.n_entities, 1)
-                Q = (Q - Q_mean) / (Q_std + 1e-9)
                 K = self.WKs[i](inputs)
-                K_mean = K.mean(dim=2).view(-1, self.n_entities, 1)
-                K_std = K.std(dim=2).view(-1, self.n_entities, 1)
-                K = (K - K_mean) / (K_std + 1e-9)
                 V = self.WVs[i](inputs)
-                V_mean = V.mean(dim=2).view(-1, self.n_entities, 1)
-                V_std = V.std(dim=2).view(-1, self.n_entities, 1)
-                V = (V - V_mean) / (V_std + 1e-9)
-
                 # print(Q, K, V)
-                # print(Q_std.mean(), K_std.mean(), V_std.mean())
 
                 saliencies = torch.bmm(Q, K.transpose(1, 2))
-                # print(saliencies)
                 weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
                 # print(j, weights.max(dim=2))
                 head = torch.bmm(weights, V)
@@ -121,11 +112,9 @@ class AttentionMarketEncoder(nn.Module):
             outputs_mean = outputs.mean(dim=2).view(-1, self.n_entities, 1)
             outputs_std = outputs.std(dim=2).view(-1, self.n_entities, 1)
             inputs = (outputs - outputs_mean) / (outputs_std + 1e-9)
+            inputs = inputs * self.in_gain + self.in_bias
 
-        outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).view(-1, D_MODEL)
-        outputs_mean = outputs.mean(dim=1).view(-1, 1)
-        outputs_std = outputs.std(dim=1).view(-1, 1)
-        outputs = (outputs - outputs_mean) / (outputs_std + 1e-9)
+        outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
         return outputs
 
 
@@ -134,16 +123,31 @@ class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
         self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
+        self.gain1 = nn.Parameter(torch.ones(D_MODEL))
+        self.bias1 = nn.Parameter(torch.zeros(D_MODEL))
+
         self.fc2 = nn.Linear(D_MODEL, D_MODEL)
+        self.gain2 = nn.Parameter(torch.ones(D_MODEL))
+        self.bias2 = nn.Parameter(torch.zeros(D_MODEL))
+
         self.fc3 = nn.Linear(D_MODEL, 3)
 
     def forward(self, encoding, spread, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), spread.view(-1, 1), log_steps.view(-1, 1)], 1)
 
         x = F.leaky_relu(self.fc1(x)) + encoding
-        x = F.leaky_relu(self.fc2(x)) + x
-        x = self.fc3(x)
+        mean1 = x.mean(dim=1).view(-1, 1)
+        std1 = x.std(dim=1).view(-1, 1)
+        x = (x - mean1) / std1
+        x = x * self.gain1 + self.bias1
 
+        x = F.leaky_relu(self.fc2(x)) + x
+        mean2 = x.mean(dim=1).view(-1, 1)
+        std2 = x.std(dim=1).view(-1, 1)
+        x = (x - mean2) / std2
+        x = x * self.gain2 + self.bias2
+
+        x = self.fc3(x)
         advantage = (x - torch.mean(x, 1).view(-1, 1)) / (torch.sum(x.abs(), 1).view(-1, 1) + 1e-6)
 
         return advantage

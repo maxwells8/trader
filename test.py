@@ -101,9 +101,9 @@ class Worker(object):
 
 
     def run(self):
-        t0 = time.time()
         self.zeus.stream_bars(self.n_steps, self.add_bar)
 
+
 if __name__ == "__main__":
-    worker = Worker("EUR_USD", "M1", 7200*1, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
+    worker = Worker("EUR_USD", "M1", 1440, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
     worker.run()
