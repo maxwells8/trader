@@ -127,62 +127,36 @@ class Optimizer(object):
                 time_states_ = time_states_.transpose(0, 1)
 
                 market_encoding = self.encoder.forward(time_states_)
-                advantage_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
+                value_estimation = self.decoder.forward(market_encoding, spread_, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
 
-                future_value = time_states[sample_start][:,:,3].cuda()
-                potential_gain_buy = time_states[-i][:,:,3].clone().cuda()
+                # since the data time_state is using the bid price, we calculate
+                # the normalized profit as follows
+                future_value = time_states[sample_start + i][:,:,3].cuda()
+                potential_gain_buy = time_states[sample_start][:,:,3].clone().cuda()
+                potential_gain_buy -= torch.Tensor(spread[sample_start]).view(-1, 1)
                 potential_gain_buy -= future_value
-                potential_gain_buy -= torch.Tensor(spread[-i]).view(-1, 1) / 2
                 potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(i))
 
                 potential_gain_sell = future_value.clone()
-                potential_gain_sell -= time_states[-i][:,:,3].cuda()
-                potential_gain_sell -= torch.Tensor(spread[-i]).view(-1, 1) / 2
+                potential_gain_sell -= torch.Tensor(spread[sample_start + i]).view(-1, 1)
+                potential_gain_sell -= time_states[sample_start][:,:,3].cuda()
                 potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(i))
-
-                potential_gain_stay = torch.zeros_like(potential_gain_buy)
 
                 # print(i)
                 # print(potential_gain_buy * (std.view(-1, 1) * math.sqrt(i)))
                 # print(potential_gain_sell * (std.view(-1, 1) * math.sqrt(i)))
                 # print()
 
-                actor_pot_mean = (potential_gain_buy + potential_gain_sell + potential_gain_stay) / 3
+                actor_pot_loss_buy = F.l1_loss(value_estimation[:, 0].view(-1, 1), potential_gain_buy.detach())
+                actor_pot_loss_sell = F.l1_loss(value_estimation[:, 1].view(-1, 1), potential_gain_sell.detach())
 
-                advantage_buy = potential_gain_buy - actor_pot_mean
-                advantage_sell = potential_gain_sell - actor_pot_mean
-                advantage_stay = potential_gain_stay - actor_pot_mean
-
-                normalization_factor = (potential_gain_buy.abs() + potential_gain_sell.abs() + potential_gain_stay.abs()) + 1e-6
-
-                # print(normalization_factor)
-                # print(potential_gain_buy, advantage_buy / normalization_factor)
-                # print(potential_gain_sell, advantage_sell / normalization_factor)
-                # print(potential_gain_stay, advantage_stay / normalization_factor)
-                # print()
-
-                # print(i)
-                # print(advantage_[:, 0].view(-1, 1), advantage_buy / normalization_factor)
-                # print(advantage_[:, 1].view(-1, 1), advantage_sell / normalization_factor)
-                # print(advantage_[:, 2].view(-1, 1), advantage_stay / normalization_factor)
-                # print()
-
-                actor_pot_loss_buy = F.l1_loss(advantage_[:, 0].view(-1, 1), (advantage_buy / normalization_factor).detach())
-                actor_pot_loss_sell = F.l1_loss(advantage_[:, 1].view(-1, 1), (advantage_sell / normalization_factor).detach())
-                actor_pot_loss_stay = F.l1_loss(advantage_[:, 2].view(-1, 1), (advantage_stay / normalization_factor).detach())
-
-                # print(actor_pot_loss_buy)
-                # print(actor_pot_loss_sell)
-                # print(actor_pot_loss_stay)
-                # print()
-
-                total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean() + actor_pot_loss_stay.mean()) / self.samples_per_trajectory
+                total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.samples_per_trajectory
 
                 correct_order = False
                 value = 0
                 for j in range(self.batch_size):
-                    guesses = [float(advantage_[j, 0]), float(advantage_[j, 1]), float(advantage_[j, 2])]
-                    targets = [float(advantage_buy[j, 0]), float(advantage_sell[j, 0]), float(advantage_stay[j, 0])]
+                    guesses = [float(value_estimation[j, 0]), float(value_estimation[j, 1]), 0]
+                    targets = [float(potential_gain_buy[j, 0]), float(potential_gain_sell[j, 0]), 0]
 
                     if np.argmax(guesses) == 0:
                         value = float(potential_gain_buy[j] * (std.view(-1)[j] * math.sqrt(i)))
@@ -191,8 +165,6 @@ class Optimizer(object):
                     else:
                         value = 0
 
-                    if value_ema == 0:
-                        value_ema = value
                     value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
 
                     max_true = False

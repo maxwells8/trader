@@ -57,6 +57,8 @@ class AttentionMarketEncoder(nn.Module):
         self.device = device
 
         self.fc_bar = nn.Linear(D_BAR, D_MODEL)
+        self.in_gain = nn.Parameter(torch.ones(D_MODEL))
+        self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
 
         self.N = 6
         self.h = 8
@@ -72,10 +74,13 @@ class AttentionMarketEncoder(nn.Module):
         self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)])
         self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
 
+        self.a_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(self.N)])
+        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.N)])
+
         self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(self.N)])
         self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(self.N)])
-        self.in_gain = torch.ones(D_MODEL, requires_grad=True)
-        self.in_bias = torch.zeros(D_MODEL, requires_grad=True)
+        self.fc_out_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(self.N)])
+        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.N)])
 
         self.fc_final = nn.Linear(WINDOW, 1)
 
@@ -110,14 +115,18 @@ class AttentionMarketEncoder(nn.Module):
                 heads.append(head)
 
             heads = torch.cat(heads, dim=2)
+            out = self.WO(heads) + inputs
+            out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+            out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+            out = (out - out_mean) / (out_std + 1e-9)
+            out = out * self.a_gain[j] + self.a_bias[j]
 
-            out = F.leaky_relu(self.fc_out1[j](self.WO(heads)))
+            out = F.leaky_relu(self.fc_out1[j](out))
             out = self.fc_out2[j](out) + inputs
-
             out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
             out_std = out.std(dim=2).view(-1, self.n_entities, 1)
             inputs = (out - out_mean) / (out_std + 1e-9)
-            inputs = inputs * self.in_gain + self.in_bias
+            inputs = inputs * self.fc_out_gain[j] + self.fc_out_bias[j]
 
         outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
         return outputs
@@ -135,7 +144,7 @@ class Decoder(nn.Module):
         self.gain2 = nn.Parameter(torch.ones(D_MODEL))
         self.bias2 = nn.Parameter(torch.zeros(D_MODEL))
 
-        self.fc3 = nn.Linear(D_MODEL, 3)
+        self.fc3 = nn.Linear(D_MODEL, 2)
 
     def forward(self, encoding, spread, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), spread.view(-1, 1), log_steps.view(-1, 1)], 1)
@@ -153,9 +162,8 @@ class Decoder(nn.Module):
         x = x * self.gain2 + self.bias2
 
         x = self.fc3(x)
-        advantage = (x - torch.mean(x, 1).view(-1, 1)) / (torch.sum(x.abs(), 1).view(-1, 1) + 1e-6)
 
-        return advantage
+        return x
 
 
 class Proposer(nn.Module):
