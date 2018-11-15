@@ -54,6 +54,10 @@ class Worker(object):
         self.prev_value = self.cur_value
 
         self.n = 0
+        self.n_buy = 0
+        self.n_sell = 0
+        self.n_stay = 0
+
 
         self.profit = 0
 
@@ -73,8 +77,9 @@ class Worker(object):
             spread_ = torch.Tensor([spread]).view(1, 1, 1) / std
             time_states_ = time_states_.transpose(0, 1)
 
-            # self.n_steps_future = np.random.randint(1, 120)
-            self.n_steps_future = 60
+            self.n_steps_future = np.random.randint(1, 60)
+            self.n_steps_future = 30
+            print(self.n_steps_future)
 
             market_encoding = self.market_encoder.forward(time_states_)
             value_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([self.n_steps_future]).log())
@@ -83,7 +88,9 @@ class Worker(object):
             print(self.cur_value)
 
             action = int(torch.argmax(torch.cat([value_.squeeze(), torch.Tensor([0])], dim=0)))
+            action = int(torch.argmax(value_.squeeze(), dim=0))
             if action == 0:
+                self.n_buy += 1
                 if self.pos != "Long":
                     if self.trade is not None:
                         self.zeus.close_trade(self.trade)
@@ -91,6 +98,7 @@ class Worker(object):
                 self.pos = "Long"
                 print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++")
             elif action == 1:
+                self.n_sell += 1
                 if self.pos != "Short":
                     if self.trade is not None:
                         self.zeus.close_trade(self.trade)
@@ -98,6 +106,7 @@ class Worker(object):
                 self.pos = "Short"
                 print("-------------------------------------------------------")
             else:
+                self.n_stay += 1
                 if self.trade is not None:
                     self.zeus.close_trade(self.trade)
                 self.trade = None
@@ -112,16 +121,19 @@ class Worker(object):
             print("profit:", self.profit)
             print("profit per trade:", self.profit / self.n)
             print("gain per trade:", self.profit / (self.n * 1000))
+            print("total trades:", self.n)
+            print("p buy:", self.n_buy / self.n)
+            print("p sell:", self.n_sell / self.n)
+            print("p stay:", self.n_stay / self.n)
             print()
 
         else:
             self.steps_since_trade += 1
-
 
     def run(self):
         self.zeus.stream_bars(self.n_steps, self.add_bar)
 
 
 if __name__ == "__main__":
-    worker = Worker("EUR_USD", "M1", 7200*1, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
+    worker = Worker("NZD_USD", "M1", 1440*3, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
     worker.run()

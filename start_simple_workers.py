@@ -21,12 +21,13 @@ if __name__ == "__main__":
     def start_process():
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+        # instrument = "EUR_USD"
         granularity = "M1"
 
         # pick a time since 2006, because the volume is too small earlier
         start = np.random.randint(1136073600, int(time.time()) - (60 * (n_steps + networks.WINDOW)))
-        # since 7 nov 2018 for testing
-        # start = np.random.randint(1541548800, int(time.time()) - (60 * (n_steps + networks.WINDOW)))
+        # since 12 nov 2018 for testing
+        # start = np.random.randint(1541980800, int(time.time()) - (60 * (n_steps + networks.WINDOW)))
 
         print("starting worker {worker}... instrument: {instrument}, granularity: {gran}, start: {start}".format(worker=n_times,instrument=instrument, gran=granularity, start=start))
 
@@ -44,7 +45,7 @@ if __name__ == "__main__":
             process.join(30)
             started = False
             while not started:
-                if server.llen("experience") < 256:
+                if server.llen("experience") < 512:
                     processes[i] = start_process()
                     started = True
                 else:

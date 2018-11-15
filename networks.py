@@ -7,7 +7,7 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 256
+D_MODEL = 128
 N_LSTM_LAYERS = 1
 WINDOW = 120
 # torch.cuda.manual_seed(0)
@@ -56,11 +56,15 @@ class AttentionMarketEncoder(nn.Module):
         super(AttentionMarketEncoder, self).__init__()
         self.device = device
 
+        self.n_param = 0
         self.fc_bar = nn.Linear(D_BAR, D_MODEL)
         self.in_gain = nn.Parameter(torch.ones(D_MODEL))
         self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
+        self.n_param += D_BAR * (D_MODEL + 1)
+        self.n_param += D_MODEL
+        self.n_param += D_MODEL
 
-        self.N = 6
+        self.Ns = [2, 4, 8, 4, 2]
         self.h = 8
         self.fc_out_middle_size = D_MODEL * 2
 
@@ -69,18 +73,28 @@ class AttentionMarketEncoder(nn.Module):
 
         self.n_entities = WINDOW
 
-        self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)])
-        self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)])
-        self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)])
-        self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
+        self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WOs = nn.ModuleList(nn.Linear(self.h * self.d_v, D_MODEL, bias=False) for _ in range(len(self.Ns)))
+        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
+        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
+        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
+        self.n_param += self.h * self.d_v * D_MODEL * len(self.Ns)
 
-        self.a_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(self.N)])
-        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.N)])
+        self.a_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.n_param += D_MODEL * np.sum(self.Ns)
+        self.n_param += D_MODEL * np.sum(self.Ns)
 
-        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(self.N)])
-        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(self.N)])
-        self.fc_out_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(self.N)])
-        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.N)])
+        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(np.sum(self.Ns))])
+        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(np.sum(self.Ns))])
+        self.fc_out_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.n_param += D_MODEL * self.fc_out_middle_size * np.sum(self.Ns)
+        self.n_param += self.fc_out_middle_size * D_MODEL * np.sum(self.Ns)
+        self.n_param += D_MODEL * np.sum(self.Ns)
+        self.n_param += D_MODEL * np.sum(self.Ns)
 
         self.fc_final = nn.Linear(WINDOW, 1)
 
@@ -100,33 +114,35 @@ class AttentionMarketEncoder(nn.Module):
         inputs = (inputs_ - inputs_mean) / (inputs_std + 1e-9)
         inputs = inputs * self.in_gain + self.in_bias
 
-        for j in range(self.N):
-            heads = []
-            for i in range(self.h):
-                Q = self.WQs[i](inputs)
-                K = self.WKs[i](inputs)
-                V = self.WVs[i](inputs)
-                # print(Q, K, V)
+        for i_N, N in enumerate(self.Ns):
+            n_N = int(np.sum(self.Ns[:i_N]))
+            for j in range(N):
+                heads = []
+                for i in range(self.h):
+                    Q = self.WQs[i_N*self.h + i](inputs)
+                    K = self.WKs[i_N*self.h + i](inputs)
+                    V = self.WVs[i_N*self.h + i](inputs)
+                    # print(Q, K, V)
 
-                saliencies = torch.bmm(Q, K.transpose(1, 2))
-                weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
-                # print(j, weights.max(dim=2))
-                head = torch.bmm(weights, V)
-                heads.append(head)
+                    saliencies = torch.bmm(Q, K.transpose(1, 2))
+                    weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
+                    # print(j, weights.max(dim=2)[0].mean())
+                    head = torch.bmm(weights, V)
+                    heads.append(head)
 
-            heads = torch.cat(heads, dim=2)
-            out = self.WO(heads) + inputs
-            out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
-            out_std = out.std(dim=2).view(-1, self.n_entities, 1)
-            out = (out - out_mean) / (out_std + 1e-9)
-            out = out * self.a_gain[j] + self.a_bias[j]
+                heads = torch.cat(heads, dim=2)
+                out = self.WOs[i_N](heads) + inputs
+                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                out = (out - out_mean) / (out_std + 1e-9)
+                out = out * self.a_gain[n_N + j] + self.a_bias[n_N + j]
 
-            out = F.leaky_relu(self.fc_out1[j](out))
-            out = self.fc_out2[j](out) + inputs
-            out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
-            out_std = out.std(dim=2).view(-1, self.n_entities, 1)
-            inputs = (out - out_mean) / (out_std + 1e-9)
-            inputs = inputs * self.fc_out_gain[j] + self.fc_out_bias[j]
+                out = F.leaky_relu(self.fc_out1[n_N + j](out))
+                out = self.fc_out2[n_N + j](out) + inputs
+                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                inputs = (out - out_mean) / (out_std + 1e-9)
+                inputs = inputs * self.fc_out_gain[n_N + j] + self.fc_out_bias[n_N + j]
 
         outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
         return outputs

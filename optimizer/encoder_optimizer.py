@@ -31,7 +31,7 @@ class Optimizer(object):
         self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
         self.start_n_samples = 0
         self.start_step = 0
-        self.start_correct_order_mean = 0
+        self.start_correct_order_mean = 0.5
         self.start_value_ema = 0
         try:
             self.encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
@@ -47,7 +47,7 @@ class Optimizer(object):
             torch.save(self.decoder.state_dict(), self.models_loc + 'decoder.pt')
             self.start_n_samples = 0
             self.start_step = 0
-            self.start_correct_order_mean = 0
+            self.start_correct_order_mean = 0.5
             self.start_value_ema = 0
             cur_state = {
                 'n_samples':self.start_n_samples,
@@ -89,18 +89,13 @@ class Optimizer(object):
             # read in experience from the queue
             experiences = []
             while True:
-                if (len(experiences) < self.batch_size and self.server.llen("experience") > 0):
-                    experience = self.server.lpop("experience")
-                    experience = pickle.loads(experience)
-                    experiences.append(experience)
-                    n_experiences += 1
-                elif (step != 1 or (step == 1 and len(experiences) == self.batch_size)) and len(experiences) > 0:
-                    break
-                else:
+                if len(experiences) < self.batch_size:
                     experience = self.server.blpop("experience")[1]
                     experience = pickle.loads(experience)
                     experiences.append(experience)
                     n_experiences += 1
+                else:
+                    break
 
             self.optimizer.zero_grad()
 
@@ -132,14 +127,15 @@ class Optimizer(object):
                 # since the data time_state is using the bid price, we calculate
                 # the normalized profit as follows
                 future_value = time_states[sample_start + i][:,:,3].cuda()
-                potential_gain_buy = time_states[sample_start][:,:,3].clone().cuda()
+
+                potential_gain_buy = future_value.clone()
                 potential_gain_buy -= torch.Tensor(spread[sample_start]).view(-1, 1)
-                potential_gain_buy -= future_value
+                potential_gain_buy -= time_states[sample_start][:,:,3].cuda()
                 potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(i))
 
-                potential_gain_sell = future_value.clone()
+                potential_gain_sell = time_states[sample_start][:,:,3].clone().cuda()
                 potential_gain_sell -= torch.Tensor(spread[sample_start + i]).view(-1, 1)
-                potential_gain_sell -= time_states[sample_start][:,:,3].cuda()
+                potential_gain_sell -= future_value.clone()
                 potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(i))
 
                 # print(i)

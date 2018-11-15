@@ -8,8 +8,7 @@ import encoder_optimizer
 
 server = redis.Redis("localhost")
 
-server.set("trajectory_steps", 32)
-server.set("trajectory_steps", 120)
+server.set("trajectory_steps", 60)
 server.set("gamma", 0.99)
 
 server.set("max_rho", 1)
