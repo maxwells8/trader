@@ -31,7 +31,8 @@ class Optimizer(object):
         self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
         self.start_n_samples = 0
         self.start_step = 0
-        self.start_correct_order_mean = 0.5
+        self.start_pos_ema = 0
+        self.start_neg_ema = 0
         self.start_value_ema = 0
         try:
             self.encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
@@ -40,23 +41,34 @@ class Optimizer(object):
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
-            self.start_correct_order_mean = checkpoint['correct_order_mean']
+            self.start_pos_ema = checkpoint['pos_ema']
+            self.start_neg_ema = checkpoint['neg_ema']
             self.start_value_ema = checkpoint['value_ema']
         except Exception:
             torch.save(self.encoder.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.decoder.state_dict(), self.models_loc + 'decoder.pt')
             self.start_n_samples = 0
             self.start_step = 0
-            self.start_correct_order_mean = 0.5
+            self.start_pos_ema = 0
+            self.start_neg_ema = 0
             self.start_value_ema = 0
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
-                'correct_order_mean':self.start_correct_order_mean,
+                'p profit':self.start_pos_ema,
+                'p loss':self.start_neg_ema,
                 'value_ema':self.start_value_ema,
                 'optimizer':self.optimizer.state_dict()
             }
             torch.save(cur_state, self.models_loc + 'encoder_train.pt')
+
+        n_param_encoder = 0
+        for param in self.encoder.parameters():
+            n_param_ = 1
+            for size in param.size():
+                n_param_ *= size
+            n_param_encoder += n_param_
+        print("encoder number of parameters:", n_param_encoder)
 
         self.advantage_weight = float(self.server.get("advantage_weight").decode("utf-8"))
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
@@ -78,8 +90,9 @@ class Optimizer(object):
         t = 0
         t_tau = 0.01
 
-        correct_order_tau = 0.00001
-        correct_order_mean = self.start_correct_order_mean
+        pos_neg_tau = 0.00001
+        pos_ema = self.start_pos_ema
+        neg_ema = self.start_neg_ema
 
         value_tau = 0.00001
         value_ema = self.start_value_ema
@@ -139,6 +152,7 @@ class Optimizer(object):
                 potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(i))
 
                 # print(i)
+                # print(value_estimation)
                 # print(potential_gain_buy * (std.view(-1, 1) * math.sqrt(i)))
                 # print(potential_gain_sell * (std.view(-1, 1) * math.sqrt(i)))
                 # print()
@@ -148,7 +162,6 @@ class Optimizer(object):
 
                 total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.samples_per_trajectory
 
-                correct_order = False
                 value = 0
                 for j in range(self.batch_size):
                     guesses = [float(value_estimation[j, 0]), float(value_estimation[j, 1]), 0]
@@ -163,17 +176,15 @@ class Optimizer(object):
 
                     value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
 
-                    max_true = False
-                    min_true = False
-                    if np.argmax(guesses) == np.argmax(targets):
-                        max_true = True
-                    if np.argmin(guesses) == np.argmin(targets):
-                        min_true = True
-                    if max_true and min_true:
-                        correct_order = True
+                    positive = False
+                    negative = False
+                    if targets[np.argmax(guesses)] > 0:
+                        positive = True
+                    elif targets[np.argmax(guesses)] < 0:
+                        negative = True
 
-                    correct_order_mean = (correct_order_tau * correct_order) + (1 - correct_order_tau) * correct_order_mean
-
+                    pos_ema = positive * pos_neg_tau + pos_ema * (1 - pos_neg_tau)
+                    neg_ema = negative * pos_neg_tau + neg_ema * (1 - pos_neg_tau)
 
             if loss_ema == 0:
                 loss_ema = float(total_loss)
@@ -190,7 +201,15 @@ class Optimizer(object):
             step += 1
             n_samples += n_experiences * self.samples_per_trajectory
 
-            print("n samples: {n}, steps: {s}, time ema: {t}, loss ema: {l}, gain ema: {v}, correct order ema: {c}".format(n=n_samples, s=step, t=round(t, 5), l=round(loss_ema, 5), v=round(value_ema, 8), c=round(correct_order_mean, 5)))
+            print("n samples: {n}, steps: {s}, time ema: {t}, loss ema: {l}, gain ema: {v}, pos ema: {pos}, neg ema: {neg}".format(
+                n=n_samples,
+                s=step,
+                t=round(t, 5),
+                l=round(loss_ema, 5),
+                v=round(value_ema, 8),
+                pos=round(pos_ema, 5),
+                neg=round(neg_ema, 5)
+            ))
 
             try:
                 torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")
@@ -198,7 +217,8 @@ class Optimizer(object):
                 cur_state = {
                     'n_samples':n_samples,
                     'steps':step,
-                    'correct_order_mean':correct_order_mean,
+                    'pos_ema':pos_ema,
+                    'neg_ema':neg_ema,
                     'value_ema':value_ema,
                     'optimizer':self.optimizer.state_dict()
                 }

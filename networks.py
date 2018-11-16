@@ -56,15 +56,7 @@ class AttentionMarketEncoder(nn.Module):
         super(AttentionMarketEncoder, self).__init__()
         self.device = device
 
-        self.n_param = 0
-        self.fc_bar = nn.Linear(D_BAR, D_MODEL)
-        self.in_gain = nn.Parameter(torch.ones(D_MODEL))
-        self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
-        self.n_param += D_BAR * (D_MODEL + 1)
-        self.n_param += D_MODEL
-        self.n_param += D_MODEL
-
-        self.Ns = [2, 4, 8, 4, 2]
+        self.Ns = [2, 2, 2, 2]
         self.h = 8
         self.fc_out_middle_size = D_MODEL * 2
 
@@ -73,28 +65,22 @@ class AttentionMarketEncoder(nn.Module):
 
         self.n_entities = WINDOW
 
+        self.fc_bar = nn.Linear(D_BAR, D_MODEL)
+        self.in_gain = nn.Parameter(torch.ones(D_MODEL))
+        self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
+
         self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
         self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
         self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h * len(self.Ns))])
         self.WOs = nn.ModuleList(nn.Linear(self.h * self.d_v, D_MODEL, bias=False) for _ in range(len(self.Ns)))
-        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
-        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
-        self.n_param += D_MODEL * self.d_k * self.h * len(self.Ns)
-        self.n_param += self.h * self.d_v * D_MODEL * len(self.Ns)
 
         self.a_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(np.sum(self.Ns))])
         self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
-        self.n_param += D_MODEL * np.sum(self.Ns)
-        self.n_param += D_MODEL * np.sum(self.Ns)
 
         self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(np.sum(self.Ns))])
         self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(np.sum(self.Ns))])
         self.fc_out_gain = nn.ParameterList([nn.Parameter(torch.ones(D_MODEL)) for _ in range(np.sum(self.Ns))])
         self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
-        self.n_param += D_MODEL * self.fc_out_middle_size * np.sum(self.Ns)
-        self.n_param += self.fc_out_middle_size * D_MODEL * np.sum(self.Ns)
-        self.n_param += D_MODEL * np.sum(self.Ns)
-        self.n_param += D_MODEL * np.sum(self.Ns)
 
         self.fc_final = nn.Linear(WINDOW, 1)
 
@@ -126,7 +112,7 @@ class AttentionMarketEncoder(nn.Module):
 
                     saliencies = torch.bmm(Q, K.transpose(1, 2))
                     weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
-                    # print(j, weights.max(dim=2)[0].mean())
+                    # print(n_N + j, weights.max(dim=2)[0].mean())
                     head = torch.bmm(weights, V)
                     heads.append(head)
 
