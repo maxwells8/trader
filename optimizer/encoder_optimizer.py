@@ -73,7 +73,6 @@ class Optimizer(object):
         self.advantage_weight = float(self.server.get("advantage_weight").decode("utf-8"))
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
-        self.samples_per_trajectory = int(self.server.get("samples_per_trajectory").decode("utf-8"))
 
         self.window = networks.WINDOW
 
@@ -88,7 +87,7 @@ class Optimizer(object):
         loss_tau = 0.01
 
         t = 0
-        t_tau = 0.01
+        t_tau = 0.05
 
         pos_neg_tau = 0.00001
         pos_ema = self.start_pos_ema
@@ -113,78 +112,72 @@ class Optimizer(object):
             self.optimizer.zero_grad()
 
             batch = Experience(*zip(*experiences))
-            time_states = [*zip(*batch.time_states)]
-            for i, time_state_ in enumerate(time_states):
-                time_states[i] = torch.cat(time_state_)
-            spread = [*zip(*batch.spreads)]
+            input_time_states = [*zip(*batch.input_time_states)]
+            for i, time_state_ in enumerate(input_time_states):
+                input_time_states[i] = torch.cat(time_state_)
+            initial_spreads = batch.initial_spread
+            final_time_states = torch.cat(batch.final_time_state)
+            final_spreads = batch.final_spread
+            steps = torch.Tensor(batch.steps)
+
             total_loss = torch.Tensor([0])
 
-            samples = np.random.choice(np.arange(1, self.trajectory_steps), self.samples_per_trajectory)
-            samples.sort()
+            input_time_states_ = torch.cat(input_time_states, dim=1).clone().cuda()
+            mean = input_time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
+            std = input_time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
+            input_time_states_[:, :, :4] = (input_time_states_[:, :, :4] - mean) / std
+            spread_ = torch.Tensor(initial_spreads).view(-1, 1, 1).cuda() / std
+            input_time_states_ = input_time_states_.transpose(0, 1)
 
-            for i in samples[::-1]:
-                sample_start = np.random.randint(self.window, self.window + self.trajectory_steps - i)
+            market_encoding = self.encoder.forward(input_time_states_)
+            value_estimation = self.decoder.forward(market_encoding, spread_, steps.log().cuda())
+            # since the data time_state is using the bid price, we calculate
+            # the normalized profit as follows
 
-                time_states_ = time_states[sample_start-self.window:sample_start]
+            future_value = final_time_states[:,:,3].cuda()
 
-                time_states_ = torch.cat(time_states_, dim=1).clone().cuda()
-                mean = time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
-                std = time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
-                time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
-                spread_ = torch.Tensor(spread[-i]).view(-1, 1, 1).cuda() / std
-                time_states_ = time_states_.transpose(0, 1)
+            potential_gain_buy = future_value.clone()
+            potential_gain_buy -= input_time_states[-1][:,:,3].cuda()
+            potential_gain_buy -= torch.Tensor(initial_spreads).view(-1, 1)
+            potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * torch.sqrt(steps).view(-1, 1))
 
-                market_encoding = self.encoder.forward(time_states_)
-                value_estimation = self.decoder.forward(market_encoding, spread_, torch.Tensor([i]).repeat(market_encoding.size()[0], 1).log().cuda())
+            potential_gain_sell = input_time_states[-1][:,:,3].clone().cuda()
+            potential_gain_sell -= future_value.clone()
+            potential_gain_sell -= torch.Tensor(final_spreads).view(-1, 1)
+            potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * torch.sqrt(steps).view(-1, 1))
 
-                # since the data time_state is using the bid price, we calculate
-                # the normalized profit as follows
-                future_value = time_states[sample_start + i][:,:,3].cuda()
+            actor_pot_loss_buy = F.l1_loss(value_estimation[:, 0].view(-1, 1), potential_gain_buy.detach())
+            actor_pot_loss_sell = F.l1_loss(value_estimation[:, 1].view(-1, 1), potential_gain_sell.detach())
 
-                potential_gain_buy = future_value.clone()
-                potential_gain_buy -= torch.Tensor(spread[sample_start]).view(-1, 1)
-                potential_gain_buy -= time_states[sample_start][:,:,3].cuda()
-                potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * math.sqrt(i))
+            total_loss += actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()
 
-                potential_gain_sell = time_states[sample_start][:,:,3].clone().cuda()
-                potential_gain_sell -= torch.Tensor(spread[sample_start + i]).view(-1, 1)
-                potential_gain_sell -= future_value.clone()
-                potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * math.sqrt(i))
+            # print(value_estimation[:, 0], potential_gain_buy.squeeze())
+            # print(value_estimation[:, 1], potential_gain_sell.squeeze())
+            # print()
 
-                # print(i)
-                # print(value_estimation)
-                # print(potential_gain_buy * (std.view(-1, 1) * math.sqrt(i)))
-                # print(potential_gain_sell * (std.view(-1, 1) * math.sqrt(i)))
-                # print()
+            value = 0
+            for j in range(self.batch_size):
+                guesses = [float(value_estimation[j, 0]), float(value_estimation[j, 1]), 0]
+                targets = [float(potential_gain_buy[j, 0]), float(potential_gain_sell[j, 0]), 0]
 
-                actor_pot_loss_buy = F.l1_loss(value_estimation[:, 0].view(-1, 1), potential_gain_buy.detach())
-                actor_pot_loss_sell = F.l1_loss(value_estimation[:, 1].view(-1, 1), potential_gain_sell.detach())
+                if np.argmax(guesses) == 0:
+                    value = float(potential_gain_buy[j] * (std.view(-1)[j] * torch.sqrt(steps.view(-1)[j])))
+                elif np.argmax(guesses) == 1:
+                    value = float(potential_gain_sell[j] * (std.view(-1)[j] * torch.sqrt(steps.view(-1)[j])))
+                else:
+                    value = 0
 
-                total_loss += (actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()) / self.samples_per_trajectory
+                value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
 
-                value = 0
-                for j in range(self.batch_size):
-                    guesses = [float(value_estimation[j, 0]), float(value_estimation[j, 1]), 0]
-                    targets = [float(potential_gain_buy[j, 0]), float(potential_gain_sell[j, 0]), 0]
+                positive = False
+                negative = False
+                if value > 0:
+                    positive = True
+                elif value < 0:
+                    negative = True
 
-                    if np.argmax(guesses) == 0:
-                        value = float(potential_gain_buy[j] * (std.view(-1)[j] * math.sqrt(i)))
-                    elif np.argmax(guesses) == 1:
-                        value = float(potential_gain_sell[j] * (std.view(-1)[j] * math.sqrt(i)))
-                    else:
-                        value = 0
-
-                    value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
-
-                    positive = False
-                    negative = False
-                    if targets[np.argmax(guesses)] > 0:
-                        positive = True
-                    elif targets[np.argmax(guesses)] < 0:
-                        negative = True
-
-                    pos_ema = positive * pos_neg_tau + pos_ema * (1 - pos_neg_tau)
-                    neg_ema = negative * pos_neg_tau + neg_ema * (1 - pos_neg_tau)
+                pos_ema = positive * pos_neg_tau + pos_ema * (1 - pos_neg_tau)
+                neg_ema = negative * pos_neg_tau + neg_ema * (1 - pos_neg_tau)
 
             if loss_ema == 0:
                 loss_ema = float(total_loss)
@@ -194,12 +187,10 @@ class Optimizer(object):
             assert torch.isnan(total_loss).sum() == 0
 
             total_loss.backward()
-            # for param in self.encoder.parameters():
-            #     print(param.data)
             self.optimizer.step()
 
             step += 1
-            n_samples += n_experiences * self.samples_per_trajectory
+            n_samples += n_experiences
 
             print("n samples: {n}, steps: {s}, time ema: {t}, loss ema: {l}, gain ema: {v}, pos ema: {pos}, neg ema: {neg}".format(
                 n=n_samples,

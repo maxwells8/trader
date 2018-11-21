@@ -63,7 +63,7 @@ class Worker(object):
         self.profit = 0
 
     def add_bar(self, bar):
-        time_state = torch.Tensor([bar.open, bar.high, bar.low, bar.close]).view(1, 1, -1)
+        time_state = torch.Tensor([bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]).view(1, 1, -1)
         self.time_states.append(time_state)
         if len(self.time_states) > self.window:
             del self.time_states[0]
@@ -79,16 +79,18 @@ class Worker(object):
             time_states_ = time_states_.transpose(0, 1)
 
             self.n_steps_future = np.random.randint(1, 60)
-            # self.n_steps_future = 30
+            # self.n_steps_future = 60
             print(self.n_steps_future)
 
             market_encoding = self.market_encoder.forward(time_states_)
             value_ = self.decoder.forward(market_encoding, spread_, torch.Tensor([self.n_steps_future]).log())
             print(value_)
+
             self.cur_value = self.zeus.unrealized_balance()
             print(self.cur_value)
 
             action = int(torch.argmax(torch.cat([value_.squeeze(), torch.Tensor([0])], dim=0)))
+            # action = int(torch.argmax(value_.squeeze()))
             if action == 0:
                 self.n_buy += 1
                 if self.pos != "Long":
@@ -119,8 +121,8 @@ class Worker(object):
                 self.n_loss += 1
             self.profit += self.cur_value - self.prev_value
             self.n += 1
-            self.prev_value = self.cur_value
 
+            print("profit this trade:", self.cur_value - self.prev_value)
             print("profit:", self.profit)
             print("profit per trade:", self.profit / self.n)
             print("gain per trade:", self.profit / (self.n * 1000))
@@ -132,6 +134,8 @@ class Worker(object):
             print("p stay:", self.n_stay / self.n)
             print()
 
+            self.prev_value = self.cur_value
+
         else:
             self.steps_since_trade += 1
 
@@ -140,5 +144,5 @@ class Worker(object):
 
 
 if __name__ == "__main__":
-    worker = Worker("EUR_USD", "M1", 7200*1, 'C:\\Users\\Preston\\Programming\\trader\\models\\')
+    worker = Worker("EUR_USD", "M1", 7200*1, 'models\\')
     worker.run()

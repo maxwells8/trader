@@ -45,7 +45,7 @@ if __name__ == "__main__":
             process.join(30)
             started = False
             while not started:
-                if server.llen("experience") < 512:
+                if server.llen("experience") < 10000:
                     processes[i] = start_process()
                     started = True
                 else:
