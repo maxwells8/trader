@@ -7,18 +7,124 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 128
+D_MODEL = 512
 N_LSTM_LAYERS = 1
-WINDOW = 120
+WINDOW = 360
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
+class CNNRelationalEncoder(nn.Module):
+    def __init__(self):
+        super(CNNRelationalEncoder, self).__init__()
+
+        self.n_channels = [int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3, 3]
+        self.pool_kernel_size = 2
+        self.n_tot_entities = 128
+        self.d_e = int(D_MODEL / 2)
+        self.d_v = int(D_MODEL / 2)
+        self.d_u = int(D_MODEL / 2)
+
+        self.n_pos_entities = WINDOW
+        for k in self.kernel_sizes:
+            self.n_pos_entities = int(np.floor(self.n_pos_entities - k + 1))
+            self.n_pos_entities = int(np.floor((self.n_pos_entities - self.pool_kernel_size) / self.pool_kernel_size + 1))
+        assert self.n_pos_entities < self.n_tot_entities
+
+        self.conv1 = nn.Conv1d(in_channels=D_BAR,
+                                out_channels=self.n_channels[0],
+                                kernel_size=self.kernel_sizes[0])
+        self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
+                                out_channels=self.n_channels[1],
+                                kernel_size=self.kernel_sizes[1])
+        self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
+                                out_channels=self.n_channels[2],
+                                kernel_size=self.kernel_sizes[2])
+
+        self.max_pool = nn.MaxPool1d(self.pool_kernel_size)
+
+        self.fc_pos_vertices = nn.Linear(self.n_channels[-1] + 1, self.d_v)
+
+        self.fc_e1 = nn.Linear(self.d_e + 2 * self.d_v + self.d_u, 2 * self.d_e)
+        self.fc_e2 = nn.Linear(2 * self.d_e, self.d_e)
+        self.fc_v1 = nn.Linear(self.d_e + self.d_v + self.d_u, 2 * self.d_v)
+        self.fc_v2 = nn.Linear(2 * self.d_v, self.d_v)
+        self.fc_u1 = nn.Linear(self.d_e + self.d_v + self.d_u, 2 * self.d_u)
+        self.fc_u2 = nn.Linear(2 * self.d_u, self.d_u)
+
+        # vertex dimensions as (N, n_vertices, D_MODEL)
+        self.init_non_pos_vertices = torch.rand(self.n_tot_entities - self.n_pos_entities, self.d_v, requires_grad=True)
+        self.init_u = torch.rand(self.d_u, requires_grad=True)
+
+class CNNEncoder(nn.Module):
+    def __init__(self):
+        super(CNNEncoder, self).__init__()
+
+        self.n_channels = [int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3, 3]
+        self.pool_kernel_size = 2
+        self.fc1_out_dim = int(D_MODEL / 2)
+
+        self.conv1 = nn.Conv1d(in_channels=D_BAR,
+                                out_channels=self.n_channels[0],
+                                kernel_size=self.kernel_sizes[0])
+        self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
+                                out_channels=self.n_channels[1],
+                                kernel_size=self.kernel_sizes[1])
+        self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
+                                out_channels=self.n_channels[2],
+                                kernel_size=self.kernel_sizes[2])
+
+        self.max_pool = nn.MaxPool1d(self.pool_kernel_size)
+
+        self.fc1 = nn.Linear(D_MODEL, self.fc1_out_dim)
+
+        self.L_in = WINDOW
+        for k in self.kernel_sizes:
+            self.L_in = np.floor(self.L_in - k + 1)
+            self.L_in = np.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
+        self.L_in = int(self.L_in)
+
+        self.fc2 = nn.Linear(int(self.L_in) * self.fc1_out_dim, D_MODEL)
+        self.fc2_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.fc2_bias = nn.Parameter(torch.zeros(D_MODEL))
+
+    def forward(self, market_values):
+        time_states = []
+        for time_state in market_values:
+            time_states.append(time_state.view(-1, D_BAR, 1))
+
+        time_states = torch.cat(time_states, dim=2)
+
+        x = self.conv1(time_states)
+        x = self.max_pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv2(x)
+        x = self.max_pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv3(x)
+        x = self.max_pool(x)
+        x = F.leaky_relu(x)
+
+        x = x.transpose(1, 2)
+        x = self.fc1(x)
+        x = x.squeeze().view(-1, self.L_in * self.fc1_out_dim)
+        x = F.leaky_relu(x)
+
+        x = self.fc2(x)
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.fc2_gain) * x + self.fc2_bias
+        x = F.leaky_relu(x)
+
+        return x
 
 class MarketEncoder(nn.Module):
     """
-    goes through each market time step with an lstm, and outputs a
-    'market encoding' which includes the percentage of balance already in a
-    trade
+    DEPRECATED
     """
 
     def __init__(self, device='cuda'):
@@ -46,77 +152,134 @@ class MarketEncoder(nn.Module):
 
 
 class AttentionMarketEncoder(nn.Module):
-    """
-    TODO:
-        - add an output mlp instead of max pooling. this will force a fixed number
-        of entities, but should add to its ability to learn.
-    """
 
-    def __init__(self):
+    def __init__(self, device='cuda'):
+        """
+        if you're gonna use this, fix the layer normalization first
+        """
         super(AttentionMarketEncoder, self).__init__()
+        self.device = device
 
-        self.fc_bar = nn.Linear(D_BAR, D_MODEL)
-        self.fc_in = nn.Linear(1, D_MODEL)
-        self.fc_spread = nn.Linear(1, D_MODEL)
-
-        self.N = 2
-
+        self.Ns = [2, 2, 2, 2]
         self.h = 8
+        self.fc_out_middle_size = D_MODEL * 2
+
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
 
-        self.n_entities = WINDOW + 2
+        self.n_entities = WINDOW
 
-        self.WQs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
-        for i, WQ in enumerate(self.WQs):
-            self.add_module("WQ" + str(i), WQ)
-        self.WKs = [nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h)]
-        for i, WK in enumerate(self.WKs):
-            self.add_module("WK" + str(i), WK)
-        self.WVs = [nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h)]
-        for i, WV in enumerate(self.WVs):
-            self.add_module("WV" + str(i), WV)
-        self.WO = nn.Linear(self.h * self.d_v, D_MODEL, bias=False)
+        self.fc_bar = nn.Linear(D_BAR + 1, D_MODEL)
+        self.in_gain_ = nn.Parameter(torch.zeros(D_MODEL))
+        self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
 
-        self.fc_out = nn.Linear(D_MODEL, D_MODEL)
+        self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h * len(self.Ns))])
+        self.WOs = nn.ModuleList(nn.Linear(self.h * self.d_v, D_MODEL, bias=False) for _ in range(len(self.Ns)))
 
-        self.fc_final = nn.Linear(WINDOW + 2, 1)
+        self.a_gain_ = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
 
-    def forward(self, market_values, percent_in, spread):
+        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(np.sum(self.Ns))])
+        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(np.sum(self.Ns))])
+        self.fc_out_gain_ = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
 
-        inputs = [F.leaky_relu(self.fc_bar(market_values.view(WINDOW, -1, D_BAR)))]
-        inputs += [F.leaky_relu(self.fc_in(percent_in.view(1, -1, 1)))]
-        inputs += [F.leaky_relu(self.fc_spread(spread.view(1, -1, 1)))]
-        inputs = torch.cat(inputs).transpose(0, 1)
+        self.fc_final = nn.Linear(WINDOW, 1)
 
-        for _ in range(self.N):
-            heads = []
-            for i in range(self.h):
-                Q = self.WQs[i](inputs)
-                Q_mean = Q.mean(dim=2).view(-1, self.n_entities, 1)
-                Q_std = Q.std(dim=2).view(-1, self.n_entities, 1)
-                Q = (Q - Q_mean) / Q_std
-                K = self.WKs[i](inputs)
-                K_mean = K.mean(dim=2).view(-1, self.n_entities, 1)
-                K_std = K.std(dim=2).view(-1, self.n_entities, 1)
-                K = (K - K_mean) / K_std
-                V = self.WVs[i](inputs)
-                V_mean = V.mean(dim=2).view(-1, self.n_entities, 1)
-                V_std = V.std(dim=2).view(-1, self.n_entities, 1)
-                V = (V - V_mean) / V_std
+    def forward(self, market_values):
+        time_states = []
+        for i, time_state in enumerate(market_values):
+            if self.device == 'cuda':
+                time_states.append(torch.cat([time_state.cuda(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cuda()], dim=1).view(1, -1, D_BAR+1))
+            else:
+                time_states.append(torch.cat([time_state.cpu(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cpu()], dim=1).view(1, -1, D_BAR+1))
 
-                saliencies = torch.bmm(Q, K.transpose(1, 2))
-                weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
-                head = torch.bmm(weights, V)
-                heads.append(head)
+        time_states = torch.cat(time_states, dim=0)
+        inputs_ = [F.leaky_relu(self.fc_bar(time_states.view(WINDOW, -1, D_BAR + 1)))]
+        inputs_ = torch.cat(inputs_).transpose(0, 1)
+        inputs_mean = inputs_.mean(dim=2).view(-1, self.n_entities, 1)
+        inputs_std = inputs_.std(dim=2).view(-1, self.n_entities, 1)
+        inputs = (inputs_ - inputs_mean) / (inputs_std + 1e-9)
+        inputs = inputs * (self.in_gain_ + 1) + self.in_bias
 
-            heads = torch.cat(heads, dim=2)
-            outputs = F.leaky_relu(self.fc_out(self.WO(heads))) + inputs
-            inputs = outputs
+        for i_N, N in enumerate(self.Ns):
+            n_N = int(np.sum(self.Ns[:i_N]))
+            for j in range(N):
+                heads = []
+                for i in range(self.h):
+                    Q = self.WQs[i_N*self.h + i](inputs)
+                    K = self.WKs[i_N*self.h + i](inputs)
+                    V = self.WVs[i_N*self.h + i](inputs)
+                    # print(Q, K, V)
 
-        outputs = F.leaky_relu(self.fc_final(outputs.transpose(1, 2))).squeeze()
+                    saliencies = torch.bmm(Q, K.transpose(1, 2))
+                    weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
+                    # print(N, j, weights.max(dim=2)[0].mean())
+                    head = torch.bmm(weights, V)
+                    heads.append(head)
 
+                heads = torch.cat(heads, dim=2)
+                out = self.WOs[i_N](heads) + inputs
+                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                out = (out - out_mean) / (out_std + 1e-9)
+                out = out * (self.a_gain_[n_N + j] + 1) + self.a_bias[n_N + j]
+
+                out = F.leaky_relu(self.fc_out1[n_N + j](out))
+                out = self.fc_out2[n_N + j](out) + inputs
+                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
+                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                inputs = (out - out_mean) / (out_std + 1e-9)
+                inputs = inputs * (self.fc_out_gain_[n_N + j] + 1) + self.fc_out_bias[n_N + j]
+
+        outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
         return outputs
+
+
+class Decoder(nn.Module):
+
+    def __init__(self):
+        super(Decoder, self).__init__()
+        self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
+        self.fc2 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc3 = nn.Linear(D_MODEL, 2)
+
+    def forward(self, encoding, spread, log_steps):
+        x = torch.cat([encoding.view(-1, D_MODEL), spread.view(-1, 1), log_steps.view(-1, 1)], 1)
+
+        x = F.leaky_relu(self.fc1(x) + encoding)
+        x = F.leaky_relu(self.fc2(x) + x)
+        x = self.fc3(x)
+
+        return x
+
+
+class ClassifierDecoder(nn.Module):
+
+    def __init__(self):
+        super(ClassifierDecoder, self).__init__()
+        self.fc1 = nn.Linear(D_MODEL + 3, D_MODEL)
+        self.fc2 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc3 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_final = nn.Linear(D_MODEL, 3)
+
+    def forward(self, encoding, spread, std, confidence_interval):
+        x = torch.cat([
+            encoding.view(-1, D_MODEL),
+            (spread + 1e-6).log().view(-1, 1),
+            (std + 1e-6).log().view(-1, 1),
+            (confidence_interval + 1e-6).log().view(-1, 1)
+        ], 1)
+
+        x = F.leaky_relu(self.fc1(x) + encoding.view(-1, D_MODEL))
+        x = F.leaky_relu(self.fc2(x) + x)
+        x = F.leaky_relu(self.fc3(x) + x)
+        x = self.fc_final(x)
+        x = F.softmax(x, dim=1)
+
+        return x
 
 
 class Proposer(nn.Module):
@@ -128,16 +291,25 @@ class Proposer(nn.Module):
 
     def __init__(self):
         super(Proposer, self).__init__()
-        # this is the lstm's version
-        # self.fc1 = nn.Linear(D_MODEL + 2, 2)
-        # this is the attention version
-        self.fc1 = nn.Linear(D_MODEL, 2)
+        d_out = 2
+        self.fc1 = nn.Linear(D_MODEL, D_MODEL)
+        self.fc1_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.fc1_bias = nn.Parameter(torch.zeros(D_MODEL))
+
+        self.fc2 = nn.Linear(D_MODEL, d_out)
 
     def forward(self, market_encoding, exploration_parameter=0):
-        # this is the lstm's version
-        # x = torch.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL + 2)) + exploration_parameter)
-        # this is the attention version
-        x = torch.sigmoid(self.fc1(market_encoding.view(-1, D_MODEL)) + exploration_parameter)
+        x = self.fc1(market_encoding.view(-1, D_MODEL))
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.fc1_gain) * x + self.fc1_bias
+        x = x + market_encoding.view(-1, D_MODEL)
+        x = F.leaky_relu(x)
+
+        # print(torch.sigmoid(self.fc2(x)), torch.sigmoid(self.fc2(x) + exploration_parameter), exploration_parameter)
+        x = self.fc2(x) + exploration_parameter
+        x = torch.sigmoid(x)
         return x
 
 
@@ -153,43 +325,83 @@ class ActorCritic(nn.Module):
 
         self.d_action = 2
 
-        # this is the lstm's version
-        # self.fc1 = nn.Linear(D_MODEL + self.d_action + 2, D_MODEL)
-        # this is the attention version
         self.fc1 = nn.Linear(D_MODEL + self.d_action, D_MODEL)
+        self.fc1_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.fc1_bias = nn.Parameter(torch.zeros(D_MODEL))
 
-        # self.actor1 = nn.Linear(D_MODEL, D_MODEL)
+        self.actor1 = nn.Linear(D_MODEL, D_MODEL)
+        self.actor1_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.actor1_bias = nn.Parameter(torch.zeros(D_MODEL))
+        self.actor2 = nn.Linear(D_MODEL, 3)
+        self.actor_softmax = nn.Softmax(dim=1)
 
-        # changing the structure of this so that it won't immediately learn to
-        # just not trade
-        self.actor2 = nn.Linear(D_MODEL, 4)
-        # self.actor2 = nn.Linear(D_MODEL, 2)
-
-        # self.critic1 = nn.Linear(D_MODEL, D_MODEL)
+        self.critic1 = nn.Linear(D_MODEL, D_MODEL)
+        self.critic1_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.critic1_bias = nn.Parameter(torch.zeros(D_MODEL))
         self.critic2 = nn.Linear(D_MODEL, 1)
 
     def forward(self, market_encoding, proposed_actions, sigma=1):
 
-        # this is the lstm's version
-        # x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL + 2),
-        #                                      proposed_actions.view(-1, self.d_action)], 1)))
-        # this is the attention version
-        x = F.leaky_relu(self.fc1(torch.cat([market_encoding.view(-1, D_MODEL),
-                                             proposed_actions.view(-1, self.d_action)], 1))) + market_encoding.view(-1, D_MODEL)
+        x = self.fc1(torch.cat([
+                            market_encoding.view(-1, D_MODEL),
+                            proposed_actions.view(-1, self.d_action)
+                            ], 1))
 
-        # policy = F.leaky_relu(self.actor1(x)) + x
-        # policy = self.actor2(policy) * sigma
-        # policy = F.softmax(policy, dim=1)
-        #
-        # critic = F.leaky_relu(self.critic1(x)) + x
-        # critic = self.critic2(critic)
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.fc1_gain) * x + self.fc1_bias
+        # not adding residual to skip a connection
+        x = F.leaky_relu(x)
 
-        policy = self.actor2(x) * sigma
-        policy = F.softmax(policy, dim=1)
+        policy = self.actor1(x)
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.actor1_gain) * x + self.actor1_bias
+        x = x + market_encoding.view(-1, D_MODEL)
+        x = F.leaky_relu(x)
+        # print(self.actor_softmax(self.actor2(policy)), self.actor_softmax(self.actor2(policy) * sigma), sigma)
+        policy = self.actor2(policy) * sigma
 
-        critic = self.critic2(x)
+        policy = self.actor_softmax(policy)
+
+        critic = self.critic1(x)
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.critic1_gain) * x + self.critic1_bias
+        critic = critic + market_encoding.view(-1, D_MODEL)
+        critic = F.leaky_relu(critic)
+
+        critic = self.critic2(critic)
 
         return policy, critic
+
+
+class EncoderToOthers(nn.Module):
+
+    def __init__(self):
+        super(EncoderToOthers, self).__init__()
+        self.fc1 = nn.Linear(D_MODEL + 3, D_MODEL)
+        self.fc1_gain = nn.Parameter(torch.zeros(D_MODEL))
+        self.fc1_bias = nn.Parameter(torch.zeros(D_MODEL))
+
+    def forward(self, encoding, std, spread, percent_in):
+        x = torch.cat([
+                    encoding.view(-1, D_MODEL),
+                    std.view(-1, 1),
+                    spread.view(-1, 1),
+                    percent_in.view(-1, 1)
+                    ], 1)
+
+        x = self.fc1(x)
+        mean = x.mean(dim=1).view(-1, 1)
+        std = x.std(dim=1).view(-1, 1)
+        x = (x - mean) / std
+        x = (1 + self.fc1_gain) * x + self.fc1_bias
+        x = F.leaky_relu(x)
+        return x
 
 
 # class OrderNetwork(nn.Module):

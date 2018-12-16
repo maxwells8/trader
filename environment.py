@@ -4,15 +4,10 @@ import numpy as np
 import time
 
 
-"""
-add functionality to get some random price within the high and low of the
-current price. this can be used to continually check whether a trade is worth
-it, not just at the very beginning of the tick.
-"""
 class Env(object):
 
     def __init__(self, source, start, n_steps, spread_func_param=0, time_window=256, get_time=False):
-        self.data = pd.DataFrame(pd.read_csv(source)).iloc[start:start+n_steps]
+        self.data = pd.DataFrame(pd.read_csv(source)).iloc[start:start+n_steps+time_window]
 
         self.time_window = time_window
         self.cur_i = start
@@ -29,12 +24,12 @@ class Env(object):
 
         self.get_time = get_time
 
-        for _ in range(self.time_window):
-            time_state = TimeState(open=self.data['open'][self.cur_i],
-                                         high=self.data['high'][self.cur_i],
-                                         low=self.data['low'][self.cur_i],
-                                         close=self.data['close'][self.cur_i],
-                                         time=self.data['time'][self.cur_i],
+        for i in range(self.time_window):
+            time_state = TimeState(open=self.data['open'][start + i],
+                                         high=self.data['high'][start + i],
+                                         low=self.data['low'][start + i],
+                                         close=self.data['close'][start + i],
+                                         time=self.data['time'][start + i],
                                          spread=self.spread_func())
 
             self.time_states.append(time_state)
@@ -49,7 +44,7 @@ class Env(object):
         for time_state in self.time_states:
             torch_time_states.append(time_state.as_tensor(with_time=self.get_time))
 
-        if len(self.orders) > 0 and self.orders[-1].quantity > 0:
+        if len(self.orders) > 0 and self.orders[-1].buy:
             coef = 1
         else:
             coef = -1
@@ -65,7 +60,7 @@ class Env(object):
             # print("BUY")
             # if a buy order, but have already placed sell orders, close all
             # before buying
-            if len(self.orders) > 0 and self.orders[0].quantity < 0:
+            if len(self.orders) > 0 and not self.orders[0].buy:
                 for i, _ in enumerate(self.orders):
                     self.close_order(i)
             self.buy(placed_order[1] * self.balance)
@@ -73,7 +68,7 @@ class Env(object):
             # print("SELL")
             # if a sell order, but have already placed buy orders, close all
             # before selling
-            if len(self.orders) > 0 and self.orders[0].quantity > 0:
+            if len(self.orders) > 0 and self.orders[0].buy:
                 for i, _ in enumerate(self.orders):
                     self.close_order(i)
             self.sell(placed_order[1] * self.balance)
@@ -102,19 +97,21 @@ class Env(object):
 
     def buy(self, amount):
         self.balance -= amount
-        self.balance -= amount * self.time_states[-1].spread / 2
+        self.balance -= amount * (self.time_states[-1].spread / 2) / self.data['close'][self.cur_i]
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
-                          open_price=self.data['close'][self.cur_i] + (self.time_states[-1].spread / 2),
-                          quantity=amount / self.data['close'][self.cur_i])
+                          open_price=self.data['close'][self.cur_i],
+                          quantity=amount / self.data['close'][self.cur_i],
+                          buy=True)
 
         self.orders.append(new_order)
 
     def sell(self, amount):
         self.balance -= amount
-        self.balance -= amount * self.time_states[-1].spread / 2
+        self.balance -= amount * (self.time_states[-1].spread / 2) / self.data['close'][self.cur_i]
         new_order = Order(open_time=self.data['time'][self.cur_i + 1],
-                          open_price=self.data['close'][self.cur_i] - (self.time_states[-1].spread / 2),
-                          quantity=-amount / self.data['close'][self.cur_i])
+                          open_price=self.data['close'][self.cur_i],
+                          quantity=-amount / self.data['close'][self.cur_i],
+                          buy=False)
         self.orders.append(new_order)
 
     def close_order(self, order_i):
@@ -135,7 +132,7 @@ class Env(object):
     def orders_rewards(self):
         rewards = []
         for order in self.orders:
-            rewards.append(self.time_states[-1].close - order.open_price)
+            rewards.append(order.value(self.time_states[-1].close))
 
         return rewards
 
@@ -149,12 +146,14 @@ class Env(object):
 
 class Order(object):
 
-    def __init__(self, open_time, open_price, quantity):
+    def __init__(self, open_time, open_price, quantity, buy):
 
         self.quantity = quantity
 
         self.open_price = open_price
         self.open_time = open_time
+
+        self.buy = buy
 
     def as_ndarray(self):
         return np.array([self.open_time, self.open_price, self.quantity])
@@ -215,15 +214,82 @@ class TimeState(object):
         return self.tensor_repr
 
 if __name__ == "__main__":
-    start = 0
-    n_steps = 10
-    env = Env("C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv", start, n_steps)
-    for _ in range(n_steps):
-        print(env.get_state())
-        print(env.value)
-        action = int(input("action: "))
-        if action in [0, 1]:
-            quantity = float(input("quantity: "))
-            env.step([action, quantity])
-        else:
-            env.step([action])
+    np.random.seed(int(time.time()))
+    import networks
+
+    ME = networks.AttentionMarketEncoder()
+    DE = networks.Decoder()
+    ME.load_state_dict(torch.load('./models/market_encoder.pt'))
+    DE.load_state_dict(torch.load('./models/decoder.pt'))
+
+    sources = [
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
+    "C:\\Users\\Preston\\Programming\\trader\\normalized_data\\DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
+    ]
+    xs = []
+    ys = []
+    start = np.random.randint(0, 300000)
+    # start = 0
+    n_steps = 1_000_000
+    spread_func_param = 1.5
+    window = networks.WINDOW
+    envs = [Env(source, start, n_steps, spread_func_param, window, get_time=True) for source in sources]
+
+    time_horizons = [1 for _ in range(len(envs))]
+    prev_values = [1 for _ in range(len(envs))]
+    n_profitable = [0 for _ in range(len(envs))]
+    n_total = [0 for _ in range(len(envs))]
+    for step in range(n_steps):
+        if step % 1000 == 0:
+            try:
+                ME.load_state_dict(torch.load('./models/market_encoder.pt'))
+                DE.load_state_dict(torch.load('./models/decoder.pt'))
+            except Exception:
+                pass
+        v = []
+        for i, env in enumerate(envs):
+            v.append(env.value)
+            if step % time_horizons[i] == 0:
+                time_states, percent_in, spread, reward = env.get_state()
+                input_time_states = torch.cat(time_states[-window:]).cpu()
+                mean = input_time_states[:, 0, :4].mean()
+                std = input_time_states[:, 0, :4].std()
+                input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
+
+                spread_normalized = spread / std
+                # spread_normalized = 0.0005 / std
+
+                market_encoding = ME.forward(input_time_states)
+
+                if env.value >= prev_values[i]:
+                    n_profitable[i] += 1
+                n_total[i] += 1
+                time_horizons[i] = np.random.randint(1, 180)
+
+                advantages_ = DE.forward(market_encoding, torch.Tensor([spread_normalized]).cpu(), torch.Tensor([float(time_horizons[i])]).log())
+                print("time horizon:", time_horizons[i], "advantages:", advantages_.squeeze().detach().numpy(), "spread:", spread, "p_profitable:", n_profitable[i] / n_total[i])
+
+                prev_values[i] = env.value
+
+                action = int(torch.max(advantages_.squeeze(), 0)[1])
+                if action in [0, 1]:
+                    # quantity = min(float(advantages_[0, action]), 1)
+                    quantity = 1
+                    env.step([action, quantity])
+
+                else:
+                    env.step([action])
+
+            else:
+                env.step([4])
+
+        p = np.array(n_profitable) / np.array(n_total)
+        # print("step:", step, "profitabilities:", list(p))
+        print("step:", step, "v:", v)
+        print("n", np.sum(n_total), "mean p:", np.sum(n_profitable) / np.sum(n_total), "mean v:", np.mean(v))

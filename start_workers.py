@@ -13,20 +13,8 @@ from start_worker import start_worker
 
 if __name__ == "__main__":
 
-    sources = [
-    "./normalized_data/DAT_MT_EURUSD_M1_2010-1.3261691621962404.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2011-1.3920561137891594.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2012-1.2854807930908945.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2013-1.327902744225057.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2014-1.3285929835705848.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2015-1.109864962131578.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2016-1.1071083227321519.csv",
-    "./normalized_data/DAT_MT_EURUSD_M1_2017-1.1294884577273274.csv"
-    ]
-    source_lengths = [len(pd.read_csv(source)) for source in sources]
-    proposed_sigmas = [0, 0, -0.01, 0.01, 0, 0]
-    policy_sigmas = [1.05, 1, 1, 1, 1, 0.95]
-    spread_func_params = [0, 0, 0, 0, 0, 0]
+    granularity = "M1"
+    n_workers = 16
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/models/'
@@ -34,40 +22,72 @@ if __name__ == "__main__":
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
 
     if server.get("reward_ema") == None:
-        server.set("reward_ema", None)
+        server.set("reward_ema", 0)
         server.set("reward_emsd", 0)
 
-    global n_times
     n_times = 0
     def start_process(name):
-        i_source = random.randint(0, 7)
-        # i_source = 0
-        start = random.randint(0, source_lengths[i_source] - n_steps - networks.WINDOW - 1)
-        # start = 0
-        process = multiprocessing.Process(target=start_worker, args=(sources[i_source], name, models_loc, start, n_steps))
-        process.start()
         global n_times
+        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+
+        proposed_sigma = np.random.normal(0, 0.5)
+        server.set("proposed_sigma_" + name, proposed_sigma)
+        policy_sigma = max(0, np.random.normal(1, 0.25))
+        server.set("policy_sigma_" + name, policy_sigma)
+
+        spread_reimbursement_ratio = server.get("spread_reimbursement_ratio")
+        if spread_reimbursement_ratio is not None:
+            spread_reimbursement_ratio = 0.9999995 * float(spread_reimbursement_ratio.decode("utf-8"))
+        else:
+            spread_reimbursement_ratio = 1
+        server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
+
+        zeta = server.get("zeta")
+        if zeta is not None:
+            zeta = 0.999999 * float(zeta)
+        else:
+            zeta = 0
+        server.set("zeta", zeta)
+
+        start = np.random.randint(1136073600, 1543622400)
+
+        process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, zeta))
+        process.start()
+
         n_times += 1
-        print("number of trajectories:", n_times)
+        print("n: {n}, spread reimburse: {s}, zeta: {z}, proposed sigma: {pro_s}, policy sigma: {pol_s}".format(n=n_times, s=round(spread_reimbursement_ratio, 5), z=round(zeta, 5), pro_s=round(proposed_sigma, 5), pol_s=round(policy_sigma, 5)))
         return process
 
     processes = []
-    for i in range(len(proposed_sigmas)):
-        server.set("proposed_sigma_" + str(i), proposed_sigmas[i])
-        server.set("policy_sigma_" + str(i), policy_sigmas[i])
-        server.set("spread_func_param_" + str(i), spread_func_params[i])
-        print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
+    times = []
+    for i in range(n_workers):
         processes.append(start_process(str(i)))
+        times.append(time.time())
 
     while True:
         for i, process in enumerate(processes):
-            process.join(10)
+            while process.is_alive() and time.time() - times[i] < 15:
+                time.sleep(0.1)
+            if process.is_alive():
+                # doing process.terminate() will for whatever reason make it
+                # hang. doing process.join(time) doesn't properly close the
+                # process, so it uses all the ram and ends up crashing. so i
+                # need to just get at the root of it and figure out what's
+                # hanging in the worker.
+                try:
+                    print("terminating process")
+                    process.terminate()
+                    process.join()
+                except WindowsError as e:
+                    print("error terminating process:")
+                    print(e)
+
             started = False
             while not started:
-                if server.llen("experience") < 16:
-                    print("starting worker {worker}: proposed sigma={proposed_sigma}, policy sigma={policy_sigma}, spread param={param}".format(worker=i, proposed_sigma=proposed_sigmas[i], policy_sigma=policy_sigmas[i], param=spread_func_params[i]))
+                if server.llen("experience") < 1024:
+                    print("starting worker")
                     processes[i] = start_process(str(i))
+                    times[i] = time.time()
                     started = True
                 else:
                     time.sleep(0.1)
-            print("reward ema:", server.get("reward_ema").decode("utf-8"))

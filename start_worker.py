@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, "./worker")
-import worker
+from worker import Worker
 
-def start_worker(source, name, models_loc, start, n_steps, test=False):
-    new_worker = worker.Worker(source, name, models_loc, start, n_steps, test)
+def start_worker(name, instrument, granularity, models_loc, start, zeta, test=False):
+    new_worker = Worker(name, instrument, granularity, models_loc, start, zeta, test)
     new_worker.run()

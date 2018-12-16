@@ -2,13 +2,12 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="8d9e1410-683b-4bae-b392-9c0fa1ba01d1" name="Default" comment="idk">
-      <change beforePath="$PROJECT_DIR$/models/actor_critic.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/actor_critic.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/decoder.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/decoder.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/encoder_train.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/encoder_train.pt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/market_encoder.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/market_encoder.pt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models/optimizer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/optimizer.pt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models/proposer.pt" beforeDir="false" afterPath="$PROJECT_DIR$/models/proposer.pt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/optimizer/encoder_optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/optimizer/encoder_optimizer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/start_optimizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_optimizer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/start_workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/start_workers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/worker/worker.py" beforeDir="false" afterPath="$PROJECT_DIR$/worker/worker.py" afterDir="false" />
     </list>
     <ignored path="$PROJECT_DIR$/out/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -31,14 +30,15 @@
     <session id="-108150106">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="30" />
+          <entry key="project.closed" value="32" />
           <entry key="project.open.time.0" value="1" />
           <entry key="project.open.time.1" value="1" />
           <entry key="project.open.time.3" value="1" />
           <entry key="project.open.time.4" value="20" />
           <entry key="project.open.time.5" value="9" />
           <entry key="project.open.time.6" value="4" />
-          <entry key="project.opened" value="36" />
+          <entry key="project.open.time.8" value="1" />
+          <entry key="project.opened" value="38" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.edit">
@@ -63,14 +63,14 @@
         <counts>
           <entry key="Julia" value="1" />
           <entry key="Profiler Session" value="4" />
-          <entry key="Python" value="20" />
+          <entry key="Python" value="21" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.open">
         <counts>
           <entry key="jl" value="1" />
           <entry key="pstat" value="4" />
-          <entry key="py" value="20" />
+          <entry key="py" value="21" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.vcs.git.usages" />
@@ -78,11 +78,11 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/worker/worker.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="724">
-              <caret line="196" column="77" selection-start-line="196" selection-start-column="77" selection-end-line="196" selection-end-column="77" />
+            <state relative-caret-position="330">
+              <caret line="166" column="25" lean-forward="true" selection-start-line="166" selection-start-column="25" selection-end-line="166" selection-end-column="25" />
               <folding>
                 <element signature="e#0#12#0" expanded="true" />
               </folding>
@@ -93,8 +93,8 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="84">
-              <caret line="167" column="63" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
+            <state relative-caret-position="4386">
+              <caret line="263" column="63" selection-start-line="263" selection-start-column="63" selection-end-line="263" selection-end-column="63" />
             </state>
           </provider>
         </entry>
@@ -110,11 +110,23 @@
           </provider>
         </entry>
       </file>
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/optimizer/encoder_optimizer.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="561">
+              <caret line="105" column="77" lean-forward="true" selection-start-line="105" selection-start-column="77" selection-end-line="105" selection-end-column="77" />
+              <folding>
+                <element signature="e#0#12#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/networks.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="629">
-              <caret line="42" selection-start-line="42" selection-end-line="42" />
+            <state relative-caret-position="663">
+              <caret line="44" selection-start-line="44" selection-end-line="44" />
               <folding>
                 <element signature="e#0#12#0" expanded="true" />
               </folding>
@@ -172,8 +184,6 @@
     </navigator>
     <panes>
       <pane id="Scope" />
-      <pane id="PackagesPane" />
-      <pane id="AndroidView" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -200,6 +210,8 @@
           <select />
         </subPane>
       </pane>
+      <pane id="AndroidView" />
+      <pane id="PackagesPane" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -457,6 +469,7 @@
       <workItem from="1539280476614" duration="9000" />
       <workItem from="1539548345664" duration="167000" />
       <workItem from="1539634335666" duration="228000" />
+      <workItem from="1541033325811" duration="69000" />
     </task>
     <task id="LOCAL-00001" summary="networks, environment, normalization done-ish, working on worker / optimizer">
       <created>1534555995097</created>
@@ -511,13 +524,13 @@
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="170646000" />
+    <option name="totallyTimeSpent" value="170715000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="1936" height="1056" extended-state="6" />
     <editor active="true" />
     <layout>
-      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.39146668" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.19893333" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Image Layers" order="2" />
       <window_info id="Designer" order="3" />
@@ -595,7 +608,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/worker/worker.py</url>
-          <line>96</line>
+          <line>106</line>
           <option name="timeStamp" value="8" />
         </line-breakpoint>
       </breakpoints>
@@ -701,32 +714,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/start_optimizer.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state>
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/networks.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="629">
-          <caret line="42" selection-start-line="42" selection-end-line="42" />
-          <folding>
-            <element signature="e#0#12#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="84">
-          <caret line="167" column="63" selection-start-line="167" selection-start-column="63" selection-end-line="167" selection-end-column="63" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$USER_HOME$/Anaconda3/Lib/tokenize.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="176">
@@ -736,8 +723,44 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/worker/worker.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="724">
-          <caret line="196" column="77" selection-start-line="196" selection-start-column="77" selection-end-line="196" selection-end-column="77" />
+        <state relative-caret-position="330">
+          <caret line="166" column="25" lean-forward="true" selection-start-line="166" selection-start-column="25" selection-end-line="166" selection-end-column="25" />
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/optimizer/optimizer.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="4386">
+          <caret line="263" column="63" selection-start-line="263" selection-start-column="63" selection-end-line="263" selection-end-column="63" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/networks.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="663">
+          <caret line="44" selection-start-line="44" selection-end-line="44" />
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/start_optimizer.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state>
+          <folding>
+            <element signature="e#0#12#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/optimizer/encoder_optimizer.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="561">
+          <caret line="105" column="77" lean-forward="true" selection-start-line="105" selection-start-column="77" selection-end-line="105" selection-end-column="77" />
           <folding>
             <element signature="e#0#12#0" expanded="true" />
           </folding>
