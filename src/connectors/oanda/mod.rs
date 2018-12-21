@@ -77,7 +77,7 @@ impl OANDA {
             if len >= bar_count { break; }
 
             let mut need = bar_count - len;
-            println!("{} bars still needed", need);
+            debug!("{} bars still needed", need);
             need += 1;
             let req_count = if need > 5000 { 5000 } else { need };
             let mut res_bars = Self::load_history(token, history_count_to_url(instrument, granularity, req_count, epoch_seconds));
@@ -97,7 +97,7 @@ impl OANDA {
     }
 
     fn load_history(token: &str, uri: String) -> Vec<Bar> {
-        println!("{}", &uri);
+        debug!("{}", &uri);
         match Client::new().get(&uri)
             .header(header::Authorization(header::Bearer { token: String::from(token) }))
             .header(AcceptDatetimeFormat("UNIX".to_owned()))
@@ -109,12 +109,12 @@ impl OANDA {
                 }
                 else {
                     if !res.status().is_success() {
-                        eprintln!("OANDA ERROR PARSING HISTORY: {:?}", &res);
+                        error!("OANDA ERROR PARSING HISTORY: {:?}", &res);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("OANDA ERROR LOADING HISTORY: {}", e);
+                error!("OANDA ERROR LOADING HISTORY: {}", e);
             }
         };
         vec![]
@@ -202,11 +202,11 @@ impl OANDA {
                     // }
                 }
                 else {
-                    eprintln!("OANDA ORDER STATUS ERROR: {:?}", &res);
+                    error!("OANDA ORDER STATUS ERROR: {:?}", &res);
                 }
             },
             Err(e) => {
-                eprintln!("OANDA ORDER ERROR: {:?}", e);
+                error!("OANDA ORDER ERROR: {:?}", e);
             }
         };
         false
@@ -224,7 +224,7 @@ impl OANDA {
                 if let Ok(body) = body {
                     let position = &body["position"];
                     let long = &position["long"];
-                    let mut units = long["units"].parse_as::<u32>().unwrap();
+                    let mut units = long["units"].parse_as::<u32>().unwrap_or(0);
                     if units > 0 {
                         return Ok(Some(Position {
                             pos_type: PositionType::Long,
@@ -235,7 +235,7 @@ impl OANDA {
                     }
                     else {
                         let short = &position["short"];
-                        units = short["units"].parse_as::<u32>().unwrap();
+                        units = short["units"].parse_as::<u32>().unwrap_or(0);
                         if units > 0 {
                             return Ok(Some(Position {
                                 pos_type: PositionType::Short,
@@ -250,7 +250,7 @@ impl OANDA {
                 }
             },
             Err(e) => {
-                eprintln!("OANDA POSITION ERROR: {:?}", e);
+                error!("OANDA POSITION ERROR: {:?}", e);
             }
         };
         Err(())
@@ -278,7 +278,7 @@ impl OANDA {
                 }
             },
             Err(e) => {
-                eprintln!("OANDA ACCOUNT SUMMMARY ERROR: {:?}", e);
+                error!("OANDA ACCOUNT SUMMMARY ERROR: {:?}", e);
             }
         };
         Err(())

@@ -22,7 +22,7 @@ torch.set_num_threads(1)
 
 class Worker(object):
 
-    def __init__(self, name, instrument, granularity, models_loc, start, zeta, test=False):
+    def __init__(self, name, instrument, granularity, models_loc, start, test=False):
 
         while True:
             # putting this while loop here because sometime the optimizer
@@ -51,6 +51,8 @@ class Worker(object):
         self.server = redis.Redis("localhost")
         self.zeus = Zeus(instrument, granularity)
 
+        self.min_proposed = float(self.server.get("min_proposed").decode("utf-8"))
+
         self.time_states = []
         self.percents_in = []
         self.spreads = []
@@ -60,10 +62,6 @@ class Worker(object):
         self.rewards = []
 
         self.total_actual_reward = 0
-
-        # zeta is a way to disincentivize swtiching between buying and selling.
-        # it's given a negative reward of zeta each time it switches.
-        self.zeta = zeta
 
         self.reward_tau = float(self.server.get("reward_tau").decode("utf-8"))
         self.proposed_sigma = float(self.server.get("proposed_sigma_" + name).decode("utf-8"))
@@ -76,8 +74,13 @@ class Worker(object):
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
         self.test = test
-        self.steps_before_trajectory = np.random.randint(0, 360)
+        if self.test:
+            self.steps_before_trajectory = 360
+        else:
+            self.steps_before_trajectory = 500
         self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
+        self.i_step = 0
+        self.steps_since_push = 0
 
         self.prev_value = self.zeus.unrealized_balance()
 
@@ -98,50 +101,48 @@ class Worker(object):
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
             queried_actions = self.proposer.forward(market_encoding, exploration_parameter=torch.randn(1, 2) * self.proposed_sigma)
-            policy, value = self.actor_critic.forward(market_encoding, (queried_actions + 1e-9).log(), sigma=self.policy_sigma)
+            queried_actions = torch.max(queried_actions, torch.Tensor([self.min_proposed]))
+            queried_actions = torch.min(queried_actions, torch.Tensor([1 - self.min_proposed]))
+            policy, value = self.actor_critic.forward(market_encoding, queried_actions, sigma=self.policy_sigma)
 
             before = self.zeus.unrealized_balance()
             reward = 0
-            action = torch.multinomial(policy, 1).item()
+            if self.test:
+                action = torch.argmax(policy).item()
+            else:
+                action = torch.multinomial(policy, 1).item()
+
             if action == 0:
                 if self.zeus.position_size() < 0:
-                    reward -= self.zeta
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
                 desired_percent_in = queried_actions[0, 0].item()
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
-                    # print(0, 0, desired_percent_in, diff_percent, self.zeus.position_size(), self.zeus.units_available())
                     amount = int(abs(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available())))
-                    # print(amount)
                     self.zeus.close_units(amount)
                 else:
-                    # print(0, 1, desired_percent_in, diff_percent, self.zeus.position_size(), self.zeus.units_available())
-                    amount = int(diff_percent * max(abs(self.zeus.position_size()) + self.zeus.units_available(), 0))
-                    # print(amount)
+                    amount = int(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available()))
                     self.zeus.place_trade(amount, "Long")
+
             elif action == 1:
                 if self.zeus.position_size() > 0:
-                    reward -= self.zeta
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
                 desired_percent_in = queried_actions[0, 1].item()
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
-                    # print(1, 0, desired_percent_in, diff_percent, self.zeus.position_size(), self.zeus.units_available())
                     amount = int(abs(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available())))
-                    # print(amount)
                     self.zeus.close_units(amount)
                 else:
-                    # print(1, 1, desired_percent_in, diff_percent, self.zeus.position_size(), self.zeus.units_available())
-                    amount = int(diff_percent * max(abs(self.zeus.position_size()) + self.zeus.units_available(), 0))
-                    # print(amount)
+                    amount = int(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available()))
                     self.zeus.place_trade(amount, "Short")
             # else:
                 # # to disincentivize holding
                 # reward -= 0.1
+
             reward += (before - self.zeus.unrealized_balance()) * self.spread_reimbursement_ratio
             self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
             reward += self.zeus.unrealized_balance() - self.prev_value
@@ -150,23 +151,35 @@ class Worker(object):
             mu = policy[0, action].item()
 
             if self.test:
-                reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
-                reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
+                time.sleep(0.1)
+                reward_ema = self.server.get("test_reward_ema")
+                reward_emsd = self.server.get("test_reward_emsd")
+                if reward_ema != None:
+                    reward_ema = float(reward_ema.decode("utf-8"))
+                    reward_emsd = float(reward_emsd.decode("utf-8"))
+                else:
+                    reward_ema = 0
+                    reward_emsd = 0
+
                 print("step: {s} \
+                \npercent in: {p_in} \
+                \naction: {a} \
+                \nunrealized_balance: {u_b} \
                 \nqueried_actions: {q} \
                 \npolicy: {p} \
                 \nvalue: {v} \
-                \nrewards: {r}\n".format(s=i_step,
+                \nrewards: {r} \
+                \nreward_ema: {ema} \
+                \nreward_emsd: {emsd}\n".format(s=self.i_step,
+                                        p_in=round(percent_in, 8),
+                                        a=action,
+                                        u_b=round(self.zeus.unrealized_balance(), 2),
                                         q=queried_actions,
                                         p=policy,
-                                        v=value,
-                                        r=np.sum(self.rewards)))
-                # print("step:", i_step)
-                # print("queried_actions:", queried_actions)
-                # print("policy:", policy)
-                # print("value:", value * reward_emsd + reward_ema)
-                # print("sum rewards:", np.sum(self.rewards))
-                # print("normalized sum rewards:", (np.sum(self.rewards) - reward_ema) / (reward_emsd + 1e-9))
+                                        v=round(value.item(), 2),
+                                        r=round(self.total_actual_reward, 2),
+                                        ema=round(reward_ema, 2),
+                                        emsd=round(reward_emsd, 2)))
 
             # adding steps_since_trade to help it learn
             if action in [0, 1]:
@@ -204,7 +217,7 @@ class Worker(object):
                 del self.mus[0]
                 del self.proposed_actions[0]
 
-            if not self.test and len(self.time_states) == self.window + self.trajectory_steps:
+            if self.steps_since_push >= 3 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 self.time_states,
                 self.percents_in,
@@ -222,6 +235,11 @@ class Worker(object):
                     self.server.linsert("experience", "before", ref, experience)
                 else:
                     self.server.lpush("experience", experience)
+                self.steps_since_push = 0
+            else:
+                self.steps_since_push += 1
+
+            self.i_step += 1
 
         self.n_steps_left -= 1
         torch.cuda.empty_cache()
@@ -233,6 +251,19 @@ class Worker(object):
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
         print("time: {time}, total rewards: {reward}, steps: {steps}".format(time=time.time()-t0, reward=self.total_actual_reward, steps=self.steps_before_trajectory))
+        if self.test:
+            reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
+            reward_ema = self.server.get("test_reward_ema")
+            if reward_ema == None:
+                self.server.set("test_reward_ema", self.total_actual_reward)
+                self.server.set("test_reward_emsd", 0)
+            else:
+                reward_ema = float(reward_ema.decode("utf-8"))
+                reward_emsd = float(self.server.get("test_reward_emsd").decode("utf-8"))
+                delta = self.total_actual_reward - reward_ema
+                self.server.set("test_reward_ema", reward_ema + reward_tau * delta)
+                self.server.set("test_reward_emsd", math.sqrt((1 - reward_tau) * (reward_emsd**2 + reward_tau * (delta**2))))
+
         return self.total_actual_reward
 
 Experience = namedtuple('Experience', ('time_states',

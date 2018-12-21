@@ -132,7 +132,13 @@ class Zeus:
     def stream_live(self, callback):
         def on_bar(sess, bar):
             self.sess = sess
-            callback(bar.contents)
+            contents = None
+            try:
+                contents = bar.contents
+            except:
+                pass
+            if contents is not None:
+                callback(bar.contents)
             sys.stdout.flush()
             return self.sess
         BARFUNC = WINFUNCTYPE(c_void_p, c_void_p, POINTER(Bar))(on_bar)

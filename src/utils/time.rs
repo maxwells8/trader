@@ -5,7 +5,7 @@ pub fn market_open(timestamp: i64) -> bool {
     match dateTime.weekday() {
         Weekday::Fri => dateTime.hour() < 15,
         Weekday::Sat => false,
-        Weekday::Sun => dateTime.hour() > 15,
+        Weekday::Sun => dateTime.hour() >= 15,
         _ => true
     }
 }

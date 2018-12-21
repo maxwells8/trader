@@ -1,6 +1,8 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 
+use env_logger;
+
 use datasource;
 use models::{Granularity, RawString};
 use brokers;
@@ -48,11 +50,12 @@ impl<D: datasource::DataSource, B: brokers::Broker> ToRaw<D, B> for Rc<RawSessio
 
 #[no_mangle]
 pub extern "C" fn create_session(symbol: *const RawString, period: char, frequency: i32) -> *const () {
-    print!("Creating sim OANDA session: ");
+    env_logger::init();
+    info!("Creating sim OANDA session: ");
     let instrument = unsafe { (*symbol).to_string() };
-    print!("{}; ", instrument);
+    info!("{} ", instrument);
     let granularity = Granularity::from_parts(period, frequency).unwrap();
-    println!("{:?}", granularity);
+    info!("{:?}", granularity);
     let broker = brokers::Sim::new(&instrument);
     let datasource = datasource::OANDA::new(instrument, granularity);
     Session::new(datasource, broker).raw()
@@ -60,11 +63,12 @@ pub extern "C" fn create_session(symbol: *const RawString, period: char, frequen
 
 #[no_mangle]
 pub extern "C" fn create_live_session(symbol: *const RawString, period: char, frequency: i32) -> *const () {
-    print!("Creating **LIVE** OANDA session: ");
+    env_logger::init();
+    info!("Creating **LIVE** OANDA session: ");
     let instrument = unsafe { (*symbol).to_string() };
-    print!("{}; ", instrument);
+    info!("{}", instrument);
     let granularity = Granularity::from_parts(period, frequency).unwrap();
-    println!("{:?}", granularity);
+    info!("{:?}", granularity);
     let broker = brokers::oanda::OANDA::new(instrument.clone());
     let datasource = datasource::OANDA::new(instrument, granularity);
     Session::new(datasource, broker).raw()

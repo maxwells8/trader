@@ -299,7 +299,7 @@ class Proposer(nn.Module):
         self.fc2 = nn.Linear(D_MODEL, d_out)
 
     def forward(self, market_encoding, exploration_parameter=0):
-        x = self.fc1(market_encoding.view(-1, D_MODEL))
+        x = self.fc1(market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
         mean = x.mean(dim=1).view(-1, 1)
         std = x.std(dim=1).view(-1, 1)
         x = (x - mean) / std
@@ -307,7 +307,6 @@ class Proposer(nn.Module):
         x = x + market_encoding.view(-1, D_MODEL)
         x = F.leaky_relu(x)
 
-        # print(torch.sigmoid(self.fc2(x)), torch.sigmoid(self.fc2(x) + exploration_parameter), exploration_parameter)
         x = self.fc2(x) + exploration_parameter
         x = torch.sigmoid(x)
         return x
@@ -342,38 +341,32 @@ class ActorCritic(nn.Module):
 
     def forward(self, market_encoding, proposed_actions, sigma=1):
 
-        x = self.fc1(torch.cat([
-                            market_encoding.view(-1, D_MODEL),
-                            proposed_actions.view(-1, self.d_action)
-                            ], 1))
-
+        x = torch.cat([
+                    market_encoding.view(-1, D_MODEL),
+                    proposed_actions.view(-1, self.d_action)
+                    ], 1)
+        x = self.fc1(x) + market_encoding.view(-1, D_MODEL)
         mean = x.mean(dim=1).view(-1, 1)
         std = x.std(dim=1).view(-1, 1)
         x = (x - mean) / std
         x = (1 + self.fc1_gain) * x + self.fc1_bias
-        # not adding residual to skip a connection
         x = F.leaky_relu(x)
 
-        policy = self.actor1(x)
-        mean = x.mean(dim=1).view(-1, 1)
-        std = x.std(dim=1).view(-1, 1)
-        x = (x - mean) / std
-        x = (1 + self.actor1_gain) * x + self.actor1_bias
-        x = x + market_encoding.view(-1, D_MODEL)
-        x = F.leaky_relu(x)
-        # print(self.actor_softmax(self.actor2(policy)), self.actor_softmax(self.actor2(policy) * sigma), sigma)
+        policy = self.actor1(x) + x
+        mean = policy.mean(dim=1).view(-1, 1)
+        std = policy.std(dim=1).view(-1, 1)
+        policy = (policy - mean) / std
+        policy = (1 + self.actor1_gain) * x + self.actor1_bias
+        policy = F.leaky_relu(x)
         policy = self.actor2(policy) * sigma
-
         policy = self.actor_softmax(policy)
 
-        critic = self.critic1(x)
-        mean = x.mean(dim=1).view(-1, 1)
-        std = x.std(dim=1).view(-1, 1)
-        x = (x - mean) / std
-        x = (1 + self.critic1_gain) * x + self.critic1_bias
-        critic = critic + market_encoding.view(-1, D_MODEL)
+        critic = self.critic1(x) + x
+        mean = critic.mean(dim=1).view(-1, 1)
+        std = critic.std(dim=1).view(-1, 1)
+        critic = (critic - mean) / std
+        critic = (1 + self.critic1_gain) * x + self.critic1_bias
         critic = F.leaky_relu(critic)
-
         critic = self.critic2(critic)
 
         return policy, critic
@@ -394,8 +387,7 @@ class EncoderToOthers(nn.Module):
                     spread.view(-1, 1),
                     percent_in.view(-1, 1)
                     ], 1)
-
-        x = self.fc1(x)
+        x = self.fc1(x) + encoding.view(-1, D_MODEL)
         mean = x.mean(dim=1).view(-1, 1)
         std = x.std(dim=1).view(-1, 1)
         x = (x - mean) / std

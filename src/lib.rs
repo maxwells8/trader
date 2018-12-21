@@ -6,6 +6,9 @@ extern crate serde_derive;
 extern crate hyper;
 #[macro_use]
 extern crate serde_json as json;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 extern crate serde;
 extern crate reqwest;
 extern crate ndarray as nd;

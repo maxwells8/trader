@@ -30,32 +30,30 @@ if __name__ == "__main__":
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
 
-        proposed_sigma = np.random.normal(0, 0.5)
+        proposed_sigma = np.random.normal(0, 1)
+        # proposed_sigma = 0
         server.set("proposed_sigma_" + name, proposed_sigma)
-        policy_sigma = max(0, np.random.normal(1, 0.25))
+        policy_sigma = max(0, np.random.normal(1, 1/3))
+        # policy_sigma = 1
         server.set("policy_sigma_" + name, policy_sigma)
 
-        spread_reimbursement_ratio = server.get("spread_reimbursement_ratio")
-        if spread_reimbursement_ratio is not None:
-            spread_reimbursement_ratio = 0.9999995 * float(spread_reimbursement_ratio.decode("utf-8"))
-        else:
-            spread_reimbursement_ratio = 1
+        while True:
+            spread_reimbursement_ratio = server.get("spread_reimbursement_ratio")
+            if spread_reimbursement_ratio is not None:
+                spread_reimbursement_ratio = 0.9999995 * float(spread_reimbursement_ratio.decode("utf-8"))
+                break
+            else:
+                time.sleep(0.1)
         server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
-
-        zeta = server.get("zeta")
-        if zeta is not None:
-            zeta = 0.999999 * float(zeta)
-        else:
-            zeta = 0
-        server.set("zeta", zeta)
+        # spread_reimbursement_ratio = 0
 
         start = np.random.randint(1136073600, 1543622400)
 
-        process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, zeta))
+        process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start))
         process.start()
 
         n_times += 1
-        print("n: {n}, spread reimburse: {s}, zeta: {z}, proposed sigma: {pro_s}, policy sigma: {pol_s}".format(n=n_times, s=round(spread_reimbursement_ratio, 5), z=round(zeta, 5), pro_s=round(proposed_sigma, 5), pol_s=round(policy_sigma, 5)))
+        print("n: {n}, spread reimburse: {s}, proposed sigma: {pro_s}, policy sigma: {pol_s}".format(n=n_times, s=round(spread_reimbursement_ratio, 5), pro_s=round(proposed_sigma, 5), pol_s=round(policy_sigma, 5)))
         return process
 
     processes = []
@@ -66,7 +64,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 15:
+            while process.is_alive() and time.time() - times[i] < 20:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -84,7 +82,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                if server.llen("experience") < 1024:
+                if server.llen("experience") < 2048:
                     print("starting worker")
                     processes[i] = start_process(str(i))
                     times[i] = time.time()

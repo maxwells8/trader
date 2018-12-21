@@ -55,12 +55,13 @@ class Optimizer(object):
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
         self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
         self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))]).cuda()
+        self.min_proposed = torch.Tensor([float(self.server.get("min_proposed").decode("utf-8"))]).cuda()
 
         self.proposed_target_maximization_weight = float(self.server.get("proposed_target_maximization_weight").decode("utf-8"))
-        self.proposed_similarity_weight = float(self.server.get("proposed_similarity_weight").decode("utf-8"))
+        self.proposed_entropy_weight = float(self.server.get("proposed_entropy_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
         self.actor_v_weight = float(self.server.get("actor_v_weight").decode("utf-8"))
-        self.entropy_weight = float(self.server.get("entropy_weight").decode("utf-8"))
+        self.actor_entropy_weight = float(self.server.get("actor_entropy_weight").decode("utf-8"))
         self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
 
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
@@ -80,6 +81,7 @@ class Optimizer(object):
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
+            self.server.set("spread_reimbursement_ratio", checkpoint['spread_reimbursement_ratio'])
 
         except:
             self.optimizer = optim.Adam([params for params in self.ETO.parameters()] +
@@ -89,9 +91,12 @@ class Optimizer(object):
                                         weight_decay=self.weight_penalty)
             self.start_n_samples = 0
             self.start_step = 0
+            spread_reimbursement_ratio = 0
+            self.server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
+                'spread_reimbursement_ratio':spread_reimbursement_ratio,
                 'optimizer':self.optimizer.state_dict()
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
@@ -147,9 +152,9 @@ class Optimizer(object):
 
             critic_loss = torch.Tensor([0]).cuda()
             actor_v_loss = torch.Tensor([0]).cuda()
-            entropy_loss = torch.Tensor([0]).cuda()
+            actor_entropy_loss = torch.Tensor([0]).cuda()
             proposed_target_maximization_loss = torch.Tensor([0]).cuda()
-            proposed_similarity_loss = torch.Tensor([0]).cuda()
+            proposed_entropy_loss = torch.Tensor([0]).cuda()
 
             time_states_ = torch.cat(time_states[-window:], dim=1).detach().cuda()
             mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
@@ -160,11 +165,12 @@ class Optimizer(object):
 
             market_encoding = self.MEN.forward(time_states_)
             market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-1]).cuda())
-            proposed = self.PN.forward(market_encoding)
-            policy, value = self.ACN.forward(market_encoding, (torch.Tensor(proposed_actions[-1]).cuda().view(batch_size, -1) + 1e-9).log())
+            queried = torch.Tensor(proposed_actions[-1]).cuda().view(batch_size, -1)
+            policy, value = self.ACN.forward(market_encoding, queried)
 
-            _, target_value = self.ACN_.forward(market_encoding, (proposed + 1e-9).log())
-            proposed_similarity_loss_ = torch.abs((proposed[:, 0] - proposed[:, 1]) / proposed[:, 0] + (proposed[:, 0] - proposed[:, 1]) / proposed[:, 1]).mean()
+            proposed = self.PN.forward(market_encoding)
+            _, target_value = self.ACN_.forward(market_encoding.detach(), torch.max(proposed, self.min_proposed))
+            proposed_entropy_loss_ = torch.abs((proposed[:, 0] - proposed[:, 1]) / proposed[:, 0] + (proposed[:, 0] - proposed[:, 1]) / proposed[:, 1]).mean()
 
             v_next = value
             v_trace = value
@@ -182,22 +188,16 @@ class Optimizer(object):
                 spread_ = torch.Tensor(spread[-i]).view(-1, 1, 1).cuda() / std
                 time_states_ = time_states_.transpose(0, 1)
 
-                t_men_ = time.time()
                 market_encoding = self.MEN.forward(time_states_)
-                t_men += time.time() - t_men_
-                t_eto_ = time.time()
                 market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-i-1]).cuda())
-                t_eto += time.time() - t_eto_
-                t_pn_ = time.time()
-                proposed = self.PN.forward(market_encoding)
-                t_pn += time.time() - t_pn_
-                t_acn_ = time.time()
-                policy, value = self.ACN.forward(market_encoding, (torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1) + 1e-9).log())
-                # print(policy, value)
-                t_acn += time.time() - t_acn_
+                queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
+                policy, value = self.ACN.forward(market_encoding, queried)
 
-                _, target_value = self.ACN_.forward(market_encoding, (proposed + 1e-9).log())
-                proposed_similarity_loss_ = torch.abs((proposed[:, 0] - proposed[:, 1]) / proposed[:, 0] + (proposed[:, 0] - proposed[:, 1]) / proposed[:, 1]).mean()
+                proposed = self.PN.forward(market_encoding)
+                proposed = torch.max(proposed, self.min_proposed)
+                proposed = torch.min(proposed, 1 - self.min_proposed)
+                _, target_value = self.ACN_.forward(market_encoding.detach(), torch.max(proposed, self.min_proposed))
+                proposed_entropy_loss_ = (proposed * (proposed + 1e-9).log()).mean()
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
@@ -208,36 +208,35 @@ class Optimizer(object):
                 actor_v_loss_ *= torch.min(self.max_rho, pi_/mu_)
                 actor_v_loss_ *= (r + self.gamma * v_trace - value).detach()
 
-                entropy_loss_ = (policy * torch.log(policy + 1e-9)).mean()
+                actor_entropy_loss_ = (policy * torch.log(policy + 1e-9)).mean()
 
                 delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
                 c *= torch.min(self.max_c, pi_ / mu_)
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 critic_loss_ = F.l1_loss(value, v_trace)
-                # print(value, v_trace)
 
                 v_next = value.detach()
 
             proposed_target_maximization_loss += (-target_value).mean()
-            proposed_similarity_loss += proposed_similarity_loss_
+            proposed_entropy_loss += proposed_entropy_loss_
             actor_v_loss += actor_v_loss_.mean()
-            entropy_loss += entropy_loss_
+            actor_entropy_loss += actor_entropy_loss_
             critic_loss += critic_loss_
 
             total_loss = torch.Tensor([0]).cuda()
-            total_loss += proposed_similarity_loss * self.proposed_similarity_weight
+            total_loss += proposed_entropy_loss * self.proposed_entropy_weight
             total_loss += proposed_target_maximization_loss * self.proposed_target_maximization_weight
             total_loss += critic_loss * self.critic_weight
             total_loss += actor_v_loss * self.actor_v_weight
-            total_loss += entropy_loss * self.entropy_weight
+            total_loss += actor_entropy_loss * self.actor_entropy_weight
 
             assert torch.isnan(total_loss).sum() == 0
             total_loss.backward()
             self.optimizer.step()
 
             step += 1
-            n_samples += n_experiences * self.trajectory_steps
+            n_samples += len(self.queued_experience)
 
             prev_reward_ema = reward_ema
             prev_reward_emsd = reward_emsd
@@ -249,6 +248,7 @@ class Optimizer(object):
                 cur_state = {
                     'n_samples':n_samples,
                     'steps':step,
+                    'spread_reimbursement_ratio':self.server.get("spread_reimbursement_ratio"),
                     'optimizer':self.optimizer.state_dict()
                 }
                 torch.save(cur_state, self.models_loc + 'rl_train.pt')
@@ -272,12 +272,27 @@ class Optimizer(object):
             torch.cuda.empty_cache()
 
             print('-----------------------------------------------------------')
-            # print(t_men, t_eto, t_pn, t_acn)
             print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=step, t=round(time.time()-t0, 5)))
-            print("policy sample:\n", policy[:4].cpu().detach().numpy())
-            print("proposed sample:\n", proposed[:4].cpu().detach().numpy())
+            print()
+
+            print("policy[0] min mean max:\n", round(policy[:, 0].cpu().detach().min().item(), 7), round(policy[:, 0].cpu().detach().mean().item(), 7), round(policy[:, 0].cpu().detach().max().item(), 7))
+            print("policy[1] min mean max:\n", round(policy[:, 1].cpu().detach().min().item(), 7), round(policy[:, 1].cpu().detach().mean().item(), 7), round(policy[:, 1].cpu().detach().max().item(), 7))
+            print("policy[2] min mean max:\n", round(policy[:, 2].cpu().detach().min().item(), 7), round(policy[:, 2].cpu().detach().mean().item(), 7), round(policy[:, 2].cpu().detach().max().item(), 7))
+            print()
+
+            print("proposed[0] min mean max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))
+            print("proposed[1] min mean max:\n", round(proposed[:, 1].cpu().detach().min().item(), 7), round(proposed[:, 1].cpu().detach().mean().item(), 7), round(proposed[:, 1].cpu().detach().max().item(), 7))
+            print()
+
+            queried_actions = torch.Tensor(proposed_actions).squeeze()
+            print("queried[0] min mean max:\n", round(queried_actions[:, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, 0].cpu().detach().max().item(), 7))
+            print("queried[1] min mean max:\n", round(queried_actions[:, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, 1].cpu().detach().max().item(), 7))
+            print()
+
             print("target value sample:\n", v_trace[:4].cpu().detach().numpy())
             print("guessed value sample:\n", value[:4].cpu().detach().numpy())
-            print("weighted proposed similarity loss:", round(float(proposed_similarity_loss * self.proposed_similarity_weight), 5))
+            print()
+
+            # print("weighted proposed entropy loss:", round(float(proposed_entropy_loss * self.proposed_entropy_weight), 5))
             print("weighted critic loss:", round(float(critic_loss * self.critic_weight), 5))
             print('-----------------------------------------------------------')

@@ -7,6 +7,10 @@ use std::mem;
 use datasource::DataSource;
 use brokers::Broker;
 use session::ToRaw;
+use std::sync::mpsc::{RecvTimeoutError};
+use std::time::Duration;
+use std::io;
+use std::io::prelude::*;
 
 #[export]
 fn load_history(from: i64, to: i64, history: *mut History) {
@@ -61,11 +65,22 @@ fn stream_live(callback: *const fn(*const (), *const Bar) -> *const ()) {
     let callback = unsafe { *callback };
 
     let recv = sess.datasource.poll_latest();
-    for mut bar in recv {
-        sess.broker.borrow_mut().on_bar(&bar);
+    loop {
+        let ptr = match recv.recv_timeout(Duration::from_secs(2)) {
+            Ok(mut bar) => {
+                sess.broker.borrow_mut().on_bar(&bar);
 
-        let ptr = &mut bar as *mut Bar;
-        mem::forget(bar);
+                let ptr = &mut bar as *mut Bar;
+                mem::forget(bar);
+                ptr
+            },
+            Err(RecvTimeoutError::Disconnected) => {
+                break;
+            },
+            Err(RecvTimeoutError::Timeout) => {
+                std::ptr::null()
+            }
+        };
         sess = Session::cooked(callback(sess.raw(), ptr)).unwrap();
     }
 }

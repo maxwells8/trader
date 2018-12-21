@@ -114,12 +114,12 @@ impl Broker for Sim {
     }
 
     fn units_available(&self) -> u32 {
-        ((self.available_margin() / self.margin_req) / self.current_price) as u32
+        ((self.available_margin() / self.margin_req) / self.mid_point()) as u32
     }
 
     fn place_trade(&mut self, instrument: String, units: u32, pos: PositionType) -> Option<String> {
         if !market_open(self.current_time) {
-            println!("Failed to place trade! Trading is not currently allowed.");
+            warn!("Failed to place trade! Trading is not currently allowed.");
             return None
         }
 
@@ -143,18 +143,18 @@ impl Broker for Sim {
                 return Some(id)
             }
             else {
-                println!("Failed to place trade with margin ${}. Available margin is ${}", margin, available);
+                warn!("Failed to place trade with margin ${}. Available margin is ${}", margin, available);
             }
         }
         else {
-            println!("Failed to place trade with pos {:?}. Hedging is not allowed!", pos);
+            warn!("Failed to place trade with pos {:?}. Hedging is not allowed!", pos);
         }
         None
     }
 
     fn close_trade(&mut self, mut id: String) -> f64 {
         if !market_open(self.current_time) {
-            println!("Failed to close trade! Trading is not currently allowed.");
+            warn!("Failed to close trade! Trading is not currently allowed.");
             return 0.0
         }
 
@@ -171,7 +171,7 @@ impl Broker for Sim {
 
     fn close_units(&mut self, units: u32) -> f64 {
         if !market_open(self.current_time) {
-            println!("Failed to close trade! Trading is not currently allowed.");
+            warn!("Failed to close trade! Trading is not currently allowed.");
             return 0.0
         }
 
