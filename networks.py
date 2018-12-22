@@ -304,7 +304,6 @@ class Proposer(nn.Module):
         std = x.std(dim=1).view(-1, 1)
         x = (x - mean) / std
         x = (1 + self.fc1_gain) * x + self.fc1_bias
-        x = x + market_encoding.view(-1, D_MODEL)
         x = F.leaky_relu(x)
 
         x = self.fc2(x) + exploration_parameter
@@ -356,8 +355,8 @@ class ActorCritic(nn.Module):
         mean = policy.mean(dim=1).view(-1, 1)
         std = policy.std(dim=1).view(-1, 1)
         policy = (policy - mean) / std
-        policy = (1 + self.actor1_gain) * x + self.actor1_bias
-        policy = F.leaky_relu(x)
+        policy = (1 + self.actor1_gain) * policy + self.actor1_bias
+        policy = F.leaky_relu(policy)
         policy = self.actor2(policy) * sigma
         policy = self.actor_softmax(policy)
 
@@ -365,7 +364,7 @@ class ActorCritic(nn.Module):
         mean = critic.mean(dim=1).view(-1, 1)
         std = critic.std(dim=1).view(-1, 1)
         critic = (critic - mean) / std
-        critic = (1 + self.critic1_gain) * x + self.critic1_bias
+        critic = (1 + self.critic1_gain) * critic + self.critic1_bias
         critic = F.leaky_relu(critic)
         critic = self.critic2(critic)
 

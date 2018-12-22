@@ -14,7 +14,7 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 16
+    n_workers = 12
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/models/'
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 20:
+            while process.is_alive() and time.time() - times[i] < 30:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

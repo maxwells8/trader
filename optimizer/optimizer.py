@@ -168,10 +168,6 @@ class Optimizer(object):
             queried = torch.Tensor(proposed_actions[-1]).cuda().view(batch_size, -1)
             policy, value = self.ACN.forward(market_encoding, queried)
 
-            proposed = self.PN.forward(market_encoding)
-            _, target_value = self.ACN_.forward(market_encoding.detach(), torch.max(proposed, self.min_proposed))
-            proposed_entropy_loss_ = torch.abs((proposed[:, 0] - proposed[:, 1]) / proposed[:, 0] + (proposed[:, 0] - proposed[:, 1]) / proposed[:, 1]).mean()
-
             v_next = value
             v_trace = value
             c = 1
@@ -194,9 +190,9 @@ class Optimizer(object):
                 policy, value = self.ACN.forward(market_encoding, queried)
 
                 proposed = self.PN.forward(market_encoding)
-                proposed = torch.max(proposed, self.min_proposed)
-                proposed = torch.min(proposed, 1 - self.min_proposed)
-                _, target_value = self.ACN_.forward(market_encoding.detach(), torch.max(proposed, self.min_proposed))
+                proposed_ = torch.max(proposed, self.min_proposed)
+                proposed_ = torch.min(proposed_, 1 - self.min_proposed)
+                _, target_value = self.ACN_.forward(market_encoding.detach(), proposed_)
                 proposed_entropy_loss_ = (proposed * (proposed + 1e-9).log()).mean()
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))

@@ -217,7 +217,7 @@ class Worker(object):
                 del self.mus[0]
                 del self.proposed_actions[0]
 
-            if self.steps_since_push >= 3 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
+            if self.steps_since_push >= 2 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 self.time_states,
                 self.percents_in,
