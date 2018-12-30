@@ -29,7 +29,7 @@ class Worker(object):
             # is writing to the files and causes an exception
             self.market_encoder = CNNEncoder().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
-            self.proposer = Proposer().cpu()
+            self.proposer = ProbabilisticProposer().cpu()
             self.actor_critic = ActorCritic().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             try:
@@ -51,12 +51,11 @@ class Worker(object):
         self.server = redis.Redis("localhost")
         self.zeus = Zeus(instrument, granularity)
 
-        self.min_proposed = float(self.server.get("min_proposed").decode("utf-8"))
-
         self.time_states = []
         self.percents_in = []
         self.spreads = []
         self.proposed_actions = []
+        self.proposed_mus = []
         self.mus = []
         self.actions = []
         self.rewards = []
@@ -64,8 +63,6 @@ class Worker(object):
         self.total_actual_reward = 0
 
         self.reward_tau = float(self.server.get("reward_tau").decode("utf-8"))
-        self.proposed_sigma = float(self.server.get("proposed_sigma_" + name).decode("utf-8"))
-        self.policy_sigma = float(self.server.get("policy_sigma_" + name).decode("utf-8"))
         self.spread_reimbursement_ratio = float(self.server.get("spread_reimbursement_ratio").decode("utf-8"))
 
         self.window = networks.WINDOW
@@ -100,21 +97,18 @@ class Worker(object):
 
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
-            exploration_parameter = torch.randn(1, 2) * self.proposed_sigma
-            queried_actions = self.proposer.forward(market_encoding, exploration_parameter=exploration_parameter)
-            queried_actions = torch.max(queried_actions, torch.Tensor([self.min_proposed]))
-            queried_actions = torch.min(queried_actions, torch.Tensor([1 - self.min_proposed]))
-            policy, value = self.actor_critic.forward(market_encoding, queried_actions, sigma=self.policy_sigma)
+            queried_actions, p_actions = self.proposer.forward(market_encoding)
+            policy, value = self.actor_critic.forward(market_encoding, queried_actions)
 
             before = self.zeus.unrealized_balance()
             reward = 0
             if self.test:
-                if torch.max(policy) > 0.5:
-                    action = torch.argmax(policy).item()
-                else:
-                    action = 2
+                # if torch.max(policy) > 0.5:
+                #     action = torch.argmax(policy).item()
+                # else:
+                #     action = 2
                 # action = torch.argmax(policy).item()
-                # action = torch.multinomial(policy, 1).item()
+                action = torch.multinomial(policy, 1).item()
             else:
                 action = torch.multinomial(policy, 1).item()
 
@@ -155,6 +149,7 @@ class Worker(object):
             self.prev_value = self.zeus.unrealized_balance()
             # print(action, reward)
             mu = policy[0, action].item()
+            action_mu = p_actions.item()
 
             if self.test:
                 # time.sleep(0.1)
@@ -211,6 +206,7 @@ class Worker(object):
             self.rewards.append(reward)
             self.actions.append(action)
             self.mus.append(mu)
+            self.proposed_mus.append(action_mu)
             self.proposed_actions.append(queried_actions.tolist())
 
             if len(self.time_states) == self.window + self.trajectory_steps + 1:
@@ -221,14 +217,16 @@ class Worker(object):
                 del self.rewards[0]
                 del self.actions[0]
                 del self.mus[0]
+                del self.proposed_mus[0]
                 del self.proposed_actions[0]
 
-            if self.steps_since_push >= 2 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
+            if self.steps_since_push >= self.trajectory_steps / 4 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 self.time_states,
                 self.percents_in,
                 self.spreads,
                 self.mus,
+                self.proposed_mus,
                 self.proposed_actions,
                 self.actions,
                 self.rewards
@@ -276,6 +274,7 @@ Experience = namedtuple('Experience', ('time_states',
                                        'percents_in',
                                        'spreads',
                                        'mus',
+                                       'proposed_mus',
                                        'proposed_actions',
                                        'place_actions',
                                        'rewards'))

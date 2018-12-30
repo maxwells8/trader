@@ -342,20 +342,21 @@ class ProbabilisticProposer(nn.Module):
         z = self.fc2_z(z) + z
         z_mu = self.fc_z_mu(z).view(-1, self.d_p_z)
         z_sigma = torch.exp(self.fc_z_sigma(z).view(-1, self.d_p_z))
-        z = torch.randn(z_mu.size()) * z_sigma + z_mu
+        z = torch.randn(z_mu.size()).type(str(z_sigma.type())) * z_sigma + z_mu
 
         x = self.fc1_x(z)
         x = self.fc2_x(x) + x
         x = self.x_sigmoid(self.fc3_x(x))
 
-        p_x = self.fc1_p_x(market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
+        # making sure to detach the market_encoding from the graph
+        p_x = self.fc1_p_x(market_encoding.view(-1, D_MODEL).detach()) + market_encoding.view(-1, D_MODEL).detach()
         p_x = self.fc2_p_x(p_x) + p_x
         p_x_mu = self.fc_p_x_mu(p_x).view(-1, self.d_out, self.d_p_x)
         p_x_sigma = torch.exp(self.fc_p_x_sigma(p_x).view(-1, self.d_out, self.d_p_x))
         p_x_w = self.fc_p_x_w(p_x).view(-1, self.d_out, self.d_p_x)
         p_x_w = self.p_x_w_softmax(p_x_w)
-
-        p_x = self.p(x, p_x_mu, p_x_sigma, p_x_w)
+        # and detaching it again down here
+        p_x = self.p(x.detach(), p_x_mu, p_x_sigma, p_x_w)
 
         return x, p_x
 

@@ -14,7 +14,7 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 12
+    n_workers = 16
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/models/'
@@ -30,30 +30,13 @@ if __name__ == "__main__":
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
 
-        proposed_sigma = np.random.normal(0, 1)
-        # proposed_sigma = 0
-        server.set("proposed_sigma_" + name, proposed_sigma)
-        policy_sigma = max(0, np.random.normal(1, 0.25))
-        # policy_sigma = 1
-        server.set("policy_sigma_" + name, policy_sigma)
-
-        while True:
-            spread_reimbursement_ratio = server.get("spread_reimbursement_ratio")
-            if spread_reimbursement_ratio is not None:
-                spread_reimbursement_ratio = 0.9999995 * float(spread_reimbursement_ratio.decode("utf-8"))
-                break
-            else:
-                time.sleep(0.1)
-        server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
-        # spread_reimbursement_ratio = 0
-
         start = np.random.randint(1136073600, 1543622400)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start))
         process.start()
 
         n_times += 1
-        print("n: {n}, spread reimburse: {s}, proposed sigma: {pro_s}, policy sigma: {pol_s}".format(n=n_times, s=round(spread_reimbursement_ratio, 5), pro_s=round(proposed_sigma, 5), pol_s=round(policy_sigma, 5)))
+        print("n: {n}".format(n=n_times))
         return process
 
     processes = []

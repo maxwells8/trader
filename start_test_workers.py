@@ -29,13 +29,6 @@ if __name__ == "__main__":
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
 
-        proposed_sigma = 0
-        server.set("proposed_sigma_" + name, proposed_sigma)
-        policy_sigma = 1
-        server.set("policy_sigma_" + name, policy_sigma)
-
-        spread_reimbursement_ratio = float(server.get("spread_reimbursement_ratio").decode("utf-8"))
-
         start = np.random.randint(1136073600, 1543622400)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, True))
