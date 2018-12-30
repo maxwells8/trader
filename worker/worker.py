@@ -75,7 +75,7 @@ class Worker(object):
 
         self.test = test
         if self.test:
-            self.steps_before_trajectory = 360
+            self.steps_before_trajectory = 1000
         else:
             self.steps_before_trajectory = 500
         self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
@@ -100,7 +100,8 @@ class Worker(object):
 
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
-            queried_actions = self.proposer.forward(market_encoding, exploration_parameter=torch.randn(1, 2) * self.proposed_sigma)
+            exploration_parameter = torch.randn(1, 2) * self.proposed_sigma
+            queried_actions = self.proposer.forward(market_encoding, exploration_parameter=exploration_parameter)
             queried_actions = torch.max(queried_actions, torch.Tensor([self.min_proposed]))
             queried_actions = torch.min(queried_actions, torch.Tensor([1 - self.min_proposed]))
             policy, value = self.actor_critic.forward(market_encoding, queried_actions, sigma=self.policy_sigma)
@@ -108,7 +109,12 @@ class Worker(object):
             before = self.zeus.unrealized_balance()
             reward = 0
             if self.test:
-                action = torch.argmax(policy).item()
+                if torch.max(policy) > 0.5:
+                    action = torch.argmax(policy).item()
+                else:
+                    action = 2
+                # action = torch.argmax(policy).item()
+                # action = torch.multinomial(policy, 1).item()
             else:
                 action = torch.multinomial(policy, 1).item()
 
@@ -151,7 +157,7 @@ class Worker(object):
             mu = policy[0, action].item()
 
             if self.test:
-                time.sleep(0.1)
+                # time.sleep(0.1)
                 reward_ema = self.server.get("test_reward_ema")
                 reward_emsd = self.server.get("test_reward_emsd")
                 if reward_ema != None:

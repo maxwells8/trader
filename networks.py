@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
+import math
 import time
 
 torch.manual_seed(0)
@@ -27,8 +28,8 @@ class CNNRelationalEncoder(nn.Module):
 
         self.n_pos_entities = WINDOW
         for k in self.kernel_sizes:
-            self.n_pos_entities = int(np.floor(self.n_pos_entities - k + 1))
-            self.n_pos_entities = int(np.floor((self.n_pos_entities - self.pool_kernel_size) / self.pool_kernel_size + 1))
+            self.n_pos_entities = int(math.floor(self.n_pos_entities - k + 1))
+            self.n_pos_entities = int(math.floor((self.n_pos_entities - self.pool_kernel_size) / self.pool_kernel_size + 1))
         assert self.n_pos_entities < self.n_tot_entities
 
         self.conv1 = nn.Conv1d(in_channels=D_BAR,
@@ -81,8 +82,8 @@ class CNNEncoder(nn.Module):
 
         self.L_in = WINDOW
         for k in self.kernel_sizes:
-            self.L_in = np.floor(self.L_in - k + 1)
-            self.L_in = np.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
+            self.L_in = math.floor(self.L_in - k + 1)
+            self.L_in = math.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
         self.L_in = int(self.L_in)
 
         self.fc2 = nn.Linear(int(self.L_in) * self.fc1_out_dim, D_MODEL)
@@ -215,7 +216,7 @@ class AttentionMarketEncoder(nn.Module):
                     # print(Q, K, V)
 
                     saliencies = torch.bmm(Q, K.transpose(1, 2))
-                    weights = F.softmax(saliencies / np.sqrt(self.d_k), dim=2)
+                    weights = F.softmax(saliencies / math.sqrt(self.d_k), dim=2)
                     # print(N, j, weights.max(dim=2)[0].mean())
                     head = torch.bmm(weights, V)
                     heads.append(head)
@@ -311,6 +312,67 @@ class Proposer(nn.Module):
         return x
 
 
+class ProbabilisticProposer(nn.Module):
+
+    def __init__(self):
+        super(ProbabilisticProposer, self).__init__()
+        self.d_p_z = int(D_MODEL / 8)
+        self.d_p_x = int(D_MODEL / 32)
+        self.d_out = 2
+
+        self.fc1_z = nn.Linear(D_MODEL, D_MODEL)
+        self.fc2_z = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_z_mu = nn.Linear(D_MODEL, self.d_p_z)
+        self.fc_z_sigma = nn.Linear(D_MODEL, self.d_p_z)
+
+        self.fc1_x = nn.Linear(self.d_p_z, D_MODEL)
+        self.fc2_x = nn.Linear(D_MODEL, D_MODEL)
+        self.fc3_x = nn.Linear(D_MODEL, self.d_out)
+        self.x_sigmoid = nn.Sigmoid()
+
+        self.fc1_p_x = nn.Linear(D_MODEL, D_MODEL)
+        self.fc2_p_x = nn.Linear(D_MODEL, D_MODEL)
+        self.fc_p_x_mu = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
+        self.fc_p_x_sigma = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
+        self.fc_p_x_w = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
+        self.p_x_w_softmax = nn.Softmax(dim=2)
+
+    def forward(self, market_encoding):
+        z = self.fc1_z(market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
+        z = self.fc2_z(z) + z
+        z_mu = self.fc_z_mu(z).view(-1, self.d_p_z)
+        z_sigma = torch.exp(self.fc_z_sigma(z).view(-1, self.d_p_z))
+        z = torch.randn(z_mu.size()) * z_sigma + z_mu
+
+        x = self.fc1_x(z)
+        x = self.fc2_x(x) + x
+        x = self.x_sigmoid(self.fc3_x(x))
+
+        p_x = self.fc1_p_x(market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
+        p_x = self.fc2_p_x(p_x) + p_x
+        p_x_mu = self.fc_p_x_mu(p_x).view(-1, self.d_out, self.d_p_x)
+        p_x_sigma = torch.exp(self.fc_p_x_sigma(p_x).view(-1, self.d_out, self.d_p_x))
+        p_x_w = self.fc_p_x_w(p_x).view(-1, self.d_out, self.d_p_x)
+        p_x_w = self.p_x_w_softmax(p_x_w)
+
+        p_x = self.p(x, p_x_mu, p_x_sigma, p_x_w)
+
+        return x, p_x
+
+    def p(self, x, mu, sigma, w):
+        x = x.view(-1, self.d_out, 1)
+        # probability density function for logit normal
+        p_x_ = (1 / (torch.sqrt(2 * math.pi * sigma ** 2) + 1e-9)) * \
+                (1 / ((x + 1e-9) * (1 - x + 1e-9))) * \
+                torch.exp(-(torch.log(x / (1 - x + 1e-9) + 1e-9) - mu) ** 2 / (2 * sigma ** 2 + 1e-9))
+        # combining the probability distributions in a mixture model
+        p_x = (p_x_ * w).sum(2)
+        # getthing the combined probability
+        p_x = p_x.prod(1)
+        return p_x.view(-1, 1)
+
+
+
 class ActorCritic(nn.Module):
     """
     takes a market encoding (which also includes the percentage of balance
@@ -342,7 +404,7 @@ class ActorCritic(nn.Module):
 
         x = torch.cat([
                     market_encoding.view(-1, D_MODEL),
-                    proposed_actions.view(-1, self.d_action)
+                    (proposed_actions + 1e-9).log().view(-1, self.d_action)
                     ], 1)
         x = self.fc1(x) + market_encoding.view(-1, D_MODEL)
         mean = x.mean(dim=1).view(-1, 1)

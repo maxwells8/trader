@@ -189,28 +189,28 @@ class Optimizer(object):
                 queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
                 policy, value = self.ACN.forward(market_encoding, queried)
 
-                proposed = self.PN.forward(market_encoding)
-                proposed_ = torch.max(proposed, self.min_proposed)
-                proposed_ = torch.min(proposed_, 1 - self.min_proposed)
-                _, target_value = self.ACN_.forward(market_encoding.detach(), proposed_)
-                proposed_entropy_loss_ = (proposed * (proposed + 1e-9).log()).mean()
-
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
 
                 r = torch.Tensor(reward[-i]).cuda().view(-1, 1)
 
-                actor_v_loss_ = -torch.log(pi_ + 1e-9)
-                actor_v_loss_ *= torch.min(self.max_rho, pi_/mu_)
-                actor_v_loss_ *= (r + self.gamma * v_trace - value).detach()
-
-                actor_entropy_loss_ = (policy * torch.log(policy + 1e-9)).mean()
-
                 delta_v = (pi_ / mu_) * (r + self.gamma * v_next - value)
                 c *= torch.min(self.max_c, pi_ / mu_)
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
-                critic_loss_ = F.l1_loss(value, v_trace)
+                if i == self.trajectory_steps - 1:
+                    proposed = self.PN.forward(market_encoding)
+                    proposed_ = torch.max(proposed, self.min_proposed)
+                    proposed_ = torch.min(proposed_, 1 - self.min_proposed)
+                    _, target_value = self.ACN_.forward(market_encoding.detach(), proposed_)
+                    proposed_entropy_loss_ = (proposed * (proposed + 1e-9).log()).mean()
+
+                    actor_v_loss_ = -torch.log(pi_ + 1e-9)
+                    actor_v_loss_ *= torch.min(self.max_rho, pi_/mu_)
+                    actor_v_loss_ *= (r + self.gamma * v_trace - value).detach()
+
+                    actor_entropy_loss_ = (policy * torch.log(policy + 1e-9)).mean()
+                    critic_loss_ = F.l1_loss(value, v_trace)
 
                 v_next = value.detach()
 

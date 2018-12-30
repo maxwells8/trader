@@ -21,7 +21,7 @@ if __name__ == "__main__":
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
 
-    reward_tau = 0.1
+    reward_tau = 0.05
     server.set("test_reward_tau", reward_tau)
 
     def start_process(name):
@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 120:
+            while process.is_alive() and time.time() - times[i] < 30:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

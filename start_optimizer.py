@@ -17,10 +17,10 @@ server.set("max_c", 1)
 server.set("min_proposed", 0.001)
 
 server.set("proposed_target_maximization_weight", 1)
-server.set("proposed_entropy_weight", 0.01)
+server.set("proposed_entropy_weight", 1)
 server.set("critic_weight", 1)
 server.set("actor_v_weight", 1)
-server.set("actor_entropy_weight", 0.01)
+server.set("actor_entropy_weight", 10)
 server.set("weight_penalty", 0.0001)
 
 server.set("learning_rate", 0.00001)

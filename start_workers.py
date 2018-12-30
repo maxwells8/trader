@@ -33,7 +33,7 @@ if __name__ == "__main__":
         proposed_sigma = np.random.normal(0, 1)
         # proposed_sigma = 0
         server.set("proposed_sigma_" + name, proposed_sigma)
-        policy_sigma = max(0, np.random.normal(1, 1/3))
+        policy_sigma = max(0, np.random.normal(1, 0.25))
         # policy_sigma = 1
         server.set("policy_sigma_" + name, policy_sigma)
 
