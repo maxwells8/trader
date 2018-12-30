@@ -152,7 +152,7 @@ class Worker(object):
             action_mu = p_actions.item()
 
             if self.test:
-                # time.sleep(0.1)
+                time.sleep(0.1)
                 reward_ema = self.server.get("test_reward_ema")
                 reward_emsd = self.server.get("test_reward_emsd")
                 if reward_ema != None:
@@ -166,7 +166,8 @@ class Worker(object):
                 \npercent in: {p_in} \
                 \naction: {a} \
                 \nunrealized_balance: {u_b} \
-                \nqueried_actions: {q} \
+                \nproposed: {prop} \
+                \nproposed probability: {prop_p} \
                 \npolicy: {p} \
                 \nvalue: {v} \
                 \nrewards: {r} \
@@ -175,7 +176,8 @@ class Worker(object):
                                         p_in=round(percent_in, 8),
                                         a=action,
                                         u_b=round(self.zeus.unrealized_balance(), 2),
-                                        q=queried_actions,
+                                        prop=queried_actions,
+                                        prop_p=action_mu,
                                         p=policy,
                                         v=round(value.item(), 2),
                                         r=round(self.total_actual_reward, 2),
