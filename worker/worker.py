@@ -149,7 +149,7 @@ class Worker(object):
             self.prev_value = self.zeus.unrealized_balance()
             # print(action, reward)
             mu = policy[0, action].item()
-            action_mu = p_actions.item()
+            action_mu = p_actions.item() + 1e-9
 
             if self.test:
                 time.sleep(0.1)

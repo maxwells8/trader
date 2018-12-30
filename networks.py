@@ -314,7 +314,7 @@ class ProbabilisticProposer(nn.Module):
     def __init__(self):
         super(ProbabilisticProposer, self).__init__()
         self.d_p_z = int(D_MODEL / 8)
-        self.d_p_x = int(D_MODEL / 32)
+        self.d_p_x = 4
         self.d_out = 2
 
         self.n_z_layers = 4
@@ -343,7 +343,7 @@ class ProbabilisticProposer(nn.Module):
         self.fc_p_x_w = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
         self.p_x_w_softmax = nn.Softmax(dim=2)
 
-    def forward(self, market_encoding):
+    def forward(self, market_encoding, return_params=False):
         for i in range(self.n_z_layers):
             if i == 0:
                 z = self.z_layers[i](market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
@@ -379,7 +379,10 @@ class ProbabilisticProposer(nn.Module):
         # and detaching it again down here
         p_x = self.p(x.detach(), p_x_mu, p_x_sigma, p_x_w)
 
-        return x, p_x
+        if return_params:
+            return x, p_x, p_x_mu, p_x_sigma, p_x_w
+        else:
+            return x, p_x
 
     def p(self, x, mu, sigma, w):
         x = x.view(-1, self.d_out, 1)

@@ -139,7 +139,7 @@ class Optimizer(object):
             percent_in = [*zip(*batch.percents_in)]
             spread = [*zip(*batch.spreads)]
             mu = [*zip(*batch.mus)]
-            proposed_mus = [*zip(*batch.proposed_mus)]
+            queried_mus = [*zip(*batch.proposed_mus)]
             proposed_actions = [*zip(*batch.proposed_actions)]
             place_action = [*zip(*batch.place_actions)]
             reward = [*zip(*batch.rewards)]
@@ -189,17 +189,19 @@ class Optimizer(object):
                 market_encoding = self.MEN.forward(time_states_)
                 market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-i-1]).cuda())
                 queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
-                proposed, proposed_pi = self.PN.forward(market_encoding)
+                proposed, proposed_pi, p_x_mu, p_x_sigma, p_x_w = self.PN.forward(market_encoding, return_params=True)
+                queried_pi = self.PN.p(queried.detach(), p_x_mu, p_x_sigma, p_x_w)
                 policy, value = self.ACN.forward(market_encoding, queried)
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
-                proposed_mu = torch.Tensor(proposed_mus[-i-1]).cuda().view(-1, 1)
+                queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
 
                 r = torch.Tensor(reward[-i]).cuda().view(-1, 1)
 
-                delta_v = (pi_ / mu_) * (proposed_pi / proposed_mu) * (r + self.gamma * v_next - value)
-                c *= torch.min(self.max_c, (pi_ / mu_) * (proposed_pi / proposed_mu))
+                delta_v = torch.min(self.max_rho, (pi_ / mu_) * (queried_pi / queried_mu)) * (r + self.gamma * v_next - value)
+                c *= torch.min(self.max_c, (pi_ / mu_) * (queried_pi / queried_mu))
+
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
@@ -207,7 +209,7 @@ class Optimizer(object):
                     proposed_entropy_loss_ = (proposed * torch.log(proposed + 1e-9)).mean()
 
                     actor_v_loss_ = -torch.log(pi_ + 1e-9)
-                    actor_v_loss_ *= torch.min(self.max_rho, (pi_/mu_) * (proposed_pi / proposed_mu))
+                    actor_v_loss_ *= torch.min(self.max_rho, (pi_/mu_) * (queried_pi / queried_mu))
                     actor_v_loss_ *= (r + self.gamma * v_trace - value).detach()
 
                     actor_entropy_loss_ = (policy * torch.log(policy + 1e-9)).mean()
@@ -230,7 +232,16 @@ class Optimizer(object):
             total_loss += actor_v_loss * self.actor_v_weight
             total_loss += actor_entropy_loss * self.actor_entropy_weight
 
-            assert torch.isnan(total_loss).sum() == 0
+            try:
+                assert torch.isnan(total_loss).sum() == 0
+            except AssertionError:
+                print("proposed_entropy_loss", proposed_entropy_loss)
+                print("proposed_target_maximization_loss", proposed_target_maximization_loss)
+                print("proposed_lob_prob_loss", proposed_lob_prob_loss)
+                print("critic_loss", critic_loss)
+                print("actor_v_loss", actor_v_loss)
+                print("actor_entropy_loss", actor_entropy_loss)
+                raise AssertionError("total loss is not 0")
             total_loss.backward()
             self.optimizer.step()
 
