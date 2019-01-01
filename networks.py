@@ -313,89 +313,45 @@ class ProbabilisticProposer(nn.Module):
 
     def __init__(self):
         super(ProbabilisticProposer, self).__init__()
-        self.d_p_z = int(D_MODEL / 8)
-        self.d_p_x = 4
         self.d_out = 2
 
-        self.n_z_layers = 4
-        self.z_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_z_layers)])
-        self.z_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_z_layers)])
-        self.z_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_z_layers)])
-        self.fc_z_mu = nn.Linear(D_MODEL, self.d_p_z)
-        self.fc_z_sigma = nn.Linear(D_MODEL, self.d_p_z)
-
-        self.x_initial_layer = nn.Linear(self.d_p_z, D_MODEL)
-        self.x_initial_gain = nn.Parameter(torch.zeros(D_MODEL))
-        self.x_initial_bias = nn.Parameter(torch.zeros(D_MODEL))
-        self.n_x_layers = 4
-        self.x_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_x_layers)])
-        self.x_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_x_layers)])
-        self.x_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_x_layers)])
-        self.x_final_layer = nn.Linear(D_MODEL, self.d_out)
-        self.x_sigmoid = nn.Sigmoid()
-
-        self.n_p_x_layers = 4
-        self.p_x_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_p_x_layers)])
-        self.p_x_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_p_x_layers)])
-        self.p_x_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_p_x_layers)])
-        self.fc_p_x_mu = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
-        self.fc_p_x_sigma = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
-        self.fc_p_x_w = nn.Linear(D_MODEL, self.d_out * self.d_p_x)
-        self.p_x_w_softmax = nn.Softmax(dim=2)
+        self.n_layers = 4
+        self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
+        self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
+        self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
+        self.layer_mu = nn.Linear(D_MODEL, self.d_out)
+        self.layer_sigma = nn.Linear(D_MODEL, self.d_out)
 
     def forward(self, market_encoding, return_params=False):
-        for i in range(self.n_z_layers):
+        for i in range(self.n_layers):
             if i == 0:
-                z = self.z_layers[i](market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
+                pdf = self.layers[i](market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
             else:
-                z = self.z_layers[i](z) + z
-            z = layer_norm(z, 1 + self.z_gains[i], self.z_biases[i])
-            z = F.leaky_relu(z)
-        z_mu = self.fc_z_mu(z).view(-1, self.d_p_z)
-        z_sigma = torch.exp(self.fc_z_sigma(z).view(-1, self.d_p_z))
-        z = torch.randn(z_mu.size()).type(str(z_sigma.type())) * z_sigma + z_mu
-
-        x = self.x_initial_layer(z)
-        x = layer_norm(x, 1 + self.x_initial_gain, self.x_initial_bias)
-        for i in range(self.n_x_layers):
-            x = self.x_layers[i](x) + x
-            x = layer_norm(x, 1 + self.x_gains[i], self.x_biases[i])
-            x = F.leaky_relu(x)
-        x = self.x_final_layer(x)
-        x = self.x_sigmoid(x)
-
-        for i in range(self.n_p_x_layers):
-            if i == 0:
-                # making sure to detach the market_encoding from the graph
-                p_x = self.p_x_layers[i](market_encoding.view(-1, D_MODEL).detach()) + market_encoding.view(-1, D_MODEL).detach()
-            else:
-                p_x = self.p_x_layers[i](p_x) + p_x
-            p_x = layer_norm(p_x, 1 + self.p_x_gains[i], self.p_x_biases[i])
-            p_x = F.leaky_relu(p_x)
-        p_x_mu = self.fc_p_x_mu(p_x).view(-1, self.d_out, self.d_p_x)
-        p_x_sigma = torch.exp(self.fc_p_x_sigma(p_x).view(-1, self.d_out, self.d_p_x))
-        p_x_w = self.fc_p_x_w(p_x).view(-1, self.d_out, self.d_p_x)
-        p_x_w = self.p_x_w_softmax(p_x_w)
-        # and detaching it again down here
-        p_x = self.p(x.detach(), p_x_mu, p_x_sigma, p_x_w)
+                pdf = self.layers[i](pdf) + pdf
+            pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
+            pdf = F.leaky_relu(pdf)
+        mu = self.layer_mu(pdf).view(-1, self.d_out)
+        sigma = torch.exp(self.layer_sigma(pdf).view(-1, self.d_out))
+        x = self.inverse_cdf(torch.rand_like(mu), mu, sigma)
+        p_x = self.p(x, mu, sigma)
 
         if return_params:
-            return x, p_x, p_x_mu, p_x_sigma, p_x_w
+            return x, p_x, mu, sigma
         else:
             return x, p_x
 
-    def p(self, x, mu, sigma, w):
-        x = x.view(-1, self.d_out, 1)
+    def p(self, x, mu, sigma):
+        x = x.view(-1, self.d_out)
         # probability density function for logit normal
-        p_x_ = (1 / (torch.sqrt(2 * math.pi * sigma ** 2) + 1e-9)) * \
+        p_x = (1 / (torch.sqrt(2 * math.pi * sigma ** 2) + 1e-9)) * \
                 (1 / ((x + 1e-9) * (1 - x + 1e-9))) * \
                 torch.exp(-(torch.log(x / (1 - x + 1e-9) + 1e-9) - mu) ** 2 / (2 * sigma ** 2 + 1e-9))
-        # combining the probability distributions in a mixture model
-        p_x = (p_x_ * w).sum(2)
         # getthing the combined probability
         p_x = p_x.prod(1)
         return p_x.view(-1, 1)
 
+    def inverse_cdf(self, p, mu, sigma):
+        return torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
 
 
 class ActorCritic(nn.Module):
