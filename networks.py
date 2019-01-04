@@ -315,7 +315,7 @@ class ProbabilisticProposer(nn.Module):
         super(ProbabilisticProposer, self).__init__()
         self.d_out = 2
 
-        self.n_layers = 4
+        self.n_layers = 8
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
@@ -331,7 +331,7 @@ class ProbabilisticProposer(nn.Module):
             pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
             pdf = F.leaky_relu(pdf)
         mu = self.layer_mu(pdf).view(-1, self.d_out)
-        sigma = torch.exp(self.layer_sigma(pdf).view(-1, self.d_out))
+        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out))
         x = self.inverse_cdf(torch.rand_like(mu), mu, sigma)
         p_x = self.p(x, mu, sigma)
 
@@ -369,7 +369,7 @@ class ActorCritic(nn.Module):
         self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
         self.combined_initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.combined_initial_bias = nn.Parameter(torch.zeros(D_MODEL))
-        self.n_combined_layers = 4
+        self.n_combined_layers = 8
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
         self.combined_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
@@ -433,7 +433,7 @@ class EncoderToOthers(nn.Module):
         self.initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.initial_bias = nn.Parameter(torch.zeros(D_MODEL))
 
-        self.n_layers = 4
+        self.n_layers = 8
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])

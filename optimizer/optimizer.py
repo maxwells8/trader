@@ -31,19 +31,16 @@ class Optimizer(object):
         self.ETO = EncoderToOthers().cuda()
         self.PN = ProbabilisticProposer().cuda()
         self.ACN = ActorCritic().cuda()
-        self.ACN_ = ActorCritic().cuda()
         try:
             self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
             self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
             self.PN.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
-            self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
         except FileNotFoundError:
             self.MEN = CNNEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.PN = ProbabilisticProposer().cuda()
             self.ACN = ActorCritic().cuda()
-            self.ACN_ = ActorCritic().cuda()
 
             torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
@@ -71,9 +68,10 @@ class Optimizer(object):
         self.queued_experience = []
         self.prioritized_experience = []
         try:
-            self.optimizer = optim.Adam([params for params in self.ETO.parameters()] +
-                                        [params for params in self.PN.parameters()] +
-                                        [params for params in self.ACN.parameters()],
+            self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
+                                        [param for param in self.ETO.parameters()] +
+                                        [param for param in self.PN.parameters()] +
+                                        [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
             checkpoint = torch.load(models_loc + "rl_train.pt")
@@ -83,9 +81,10 @@ class Optimizer(object):
             self.server.set("spread_reimbursement_ratio", checkpoint['spread_reimbursement_ratio'])
 
         except:
-            self.optimizer = optim.Adam([params for params in self.ETO.parameters()] +
-                                        [params for params in self.PN.parameters()] +
-                                        [params for params in self.ACN.parameters()],
+            self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
+                                        [param for param in self.ETO.parameters()] +
+                                        [param for param in self.PN.parameters()] +
+                                        [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
             self.start_n_samples = 0
@@ -128,7 +127,6 @@ class Optimizer(object):
 
             # start grads anew
             self.optimizer.zero_grad()
-            self.ACN_.zero_grad()
 
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*experiences))
@@ -188,6 +186,7 @@ class Optimizer(object):
                 market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-i-1]).cuda())
                 queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
                 proposed, proposed_pi, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
+                # print(p_x_mu, p_x_sigma)
                 queried_pi = self.PN.p(queried.detach(), p_x_mu, p_x_sigma)
                 policy, value = self.ACN.forward(market_encoding, queried)
 
@@ -203,14 +202,13 @@ class Optimizer(object):
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
-                    _, target_value = self.ACN_.forward(market_encoding.detach(), proposed)
-                    proposed_entropy_loss += (proposed * torch.log(proposed + 1e-9)).mean()
-
                     advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
                     proposed_v_loss += (-torch.log(queried_pi + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
+                    proposed_entropy_loss += (proposed_pi * torch.log(proposed_pi + 1e-9)).mean()
+
                     critic_loss += F.l1_loss(value, v_trace)
 
                 v_next = value.detach()
@@ -252,7 +250,6 @@ class Optimizer(object):
                     'optimizer':self.optimizer.state_dict()
                 }
                 torch.save(cur_state, self.models_loc + 'rl_train.pt')
-                self.ACN_.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
             except Exception:
                 print("failed to save")
 
@@ -288,6 +285,7 @@ class Optimizer(object):
             print("queried probabilities min mean std max:\n", round(queried_pi.cpu().detach().min().item(), 7), round(queried_pi.cpu().detach().mean().item(), 7), round(queried_pi.cpu().detach().std().item(), 7), round(queried_pi.cpu().detach().max().item(), 7))
             print()
 
+            queried_actions = torch.Tensor(proposed_actions)
             print("queried[0] min mean std max:\n", round(queried_actions[:, :, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().max().item(), 7))
             print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
             print()

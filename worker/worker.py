@@ -107,8 +107,8 @@ class Worker(object):
                 #     action = torch.argmax(policy).item()
                 # else:
                 #     action = 2
-                # action = torch.argmax(policy).item()
-                action = torch.multinomial(policy, 1).item()
+                action = torch.argmax(policy).item()
+                # action = torch.multinomial(policy, 1).item()
                 # queried_actions[0, 0] = 1
                 # queried_actions[0, 1] = 1
                 # action = np.random.randint(0, 2)
