@@ -56,7 +56,7 @@ class Optimizer(object):
         self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
         self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))]).cuda()
 
-        self.proposed_target_maximization_weight = float(self.server.get("proposed_target_maximization_weight").decode("utf-8"))
+        self.proposed_v_weight = float(self.server.get("proposed_v_weight").decode("utf-8"))
         self.proposed_entropy_weight = float(self.server.get("proposed_entropy_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
         self.actor_v_weight = float(self.server.get("actor_v_weight").decode("utf-8"))
@@ -153,7 +153,7 @@ class Optimizer(object):
             critic_loss = torch.Tensor([0]).cuda()
             actor_v_loss = torch.Tensor([0]).cuda()
             actor_entropy_loss = torch.Tensor([0]).cuda()
-            proposed_target_maximization_loss = torch.Tensor([0]).cuda()
+            proposed_v_loss = torch.Tensor([0]).cuda()
             proposed_entropy_loss = torch.Tensor([0]).cuda()
 
             time_states_ = torch.cat(time_states[-window:], dim=1).detach().cuda()
@@ -197,18 +197,18 @@ class Optimizer(object):
 
                 r = torch.Tensor(reward[-i]).cuda().view(-1, 1)
 
-                delta_v = torch.min(self.max_rho, (pi_ / mu_) * (queried_pi / queried_mu)) * (r + self.gamma * v_next - value)
-                c *= torch.min(self.max_c, (pi_ / mu_) * (queried_pi / queried_mu))
+                delta_v = torch.min(self.max_rho, (pi_ / (mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9))) * (r + self.gamma * v_next - value)
+                c *= torch.min(self.max_c, (pi_ / (mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9)))
 
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
                     _, target_value = self.ACN_.forward(market_encoding.detach(), proposed)
-                    proposed_target_maximization_loss += (-target_value).mean()
                     proposed_entropy_loss += (proposed * torch.log(proposed + 1e-9)).mean()
 
-                    advantage_v = torch.min(self.max_rho, (pi_/mu_) * (queried_pi / queried_mu)) * (r + self.gamma * v_trace - value)
+                    advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
+                    proposed_v_loss += (-torch.log(queried_pi + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
                     critic_loss += F.l1_loss(value, v_trace)
@@ -217,7 +217,7 @@ class Optimizer(object):
 
             total_loss = torch.Tensor([0]).cuda()
             total_loss += proposed_entropy_loss * self.proposed_entropy_weight
-            total_loss += proposed_target_maximization_loss * self.proposed_target_maximization_weight
+            total_loss += proposed_v_loss * self.proposed_v_weight
             total_loss += critic_loss * self.critic_weight
             total_loss += actor_v_loss * self.actor_v_weight
             total_loss += actor_entropy_loss * self.actor_entropy_weight
@@ -226,10 +226,11 @@ class Optimizer(object):
                 assert torch.isnan(total_loss).sum() == 0
             except AssertionError:
                 print("proposed_entropy_loss", proposed_entropy_loss)
-                print("proposed_target_maximization_loss", proposed_target_maximization_loss)
+                print("proposed_v_loss", proposed_v_loss)
                 print("critic_loss", critic_loss)
                 print("actor_v_loss", actor_v_loss)
                 print("actor_entropy_loss", actor_entropy_loss)
+                print("value", value)
                 raise AssertionError("total loss is not 0")
             total_loss.backward()
             self.optimizer.step()
@@ -274,22 +275,21 @@ class Optimizer(object):
             print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=step, t=round(time.time()-t0, 5)))
             print()
 
-            print("policy[0] min mean max:\n", round(policy[:, 0].cpu().detach().min().item(), 7), round(policy[:, 0].cpu().detach().mean().item(), 7), round(policy[:, 0].cpu().detach().max().item(), 7))
-            print("policy[1] min mean max:\n", round(policy[:, 1].cpu().detach().min().item(), 7), round(policy[:, 1].cpu().detach().mean().item(), 7), round(policy[:, 1].cpu().detach().max().item(), 7))
-            print("policy[2] min mean max:\n", round(policy[:, 2].cpu().detach().min().item(), 7), round(policy[:, 2].cpu().detach().mean().item(), 7), round(policy[:, 2].cpu().detach().max().item(), 7))
+            print("policy[0] min mean std max:\n", round(policy[:, 0].cpu().detach().min().item(), 7), round(policy[:, 0].cpu().detach().mean().item(), 7), round(policy[:, 0].cpu().detach().std().item(), 7), round(policy[:, 0].cpu().detach().max().item(), 7))
+            print("policy[1] min mean std max:\n", round(policy[:, 1].cpu().detach().min().item(), 7), round(policy[:, 1].cpu().detach().mean().item(), 7), round(policy[:, 1].cpu().detach().std().item(), 7), round(policy[:, 1].cpu().detach().max().item(), 7))
+            print("policy[2] min mean std max:\n", round(policy[:, 2].cpu().detach().min().item(), 7), round(policy[:, 2].cpu().detach().mean().item(), 7), round(policy[:, 2].cpu().detach().std().item(), 7), round(policy[:, 2].cpu().detach().max().item(), 7))
             print()
 
-            print("proposed[0] min mean max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))
-            print("proposed[1] min mean max:\n", round(proposed[:, 1].cpu().detach().min().item(), 7), round(proposed[:, 1].cpu().detach().mean().item(), 7), round(proposed[:, 1].cpu().detach().max().item(), 7))
+            print("proposed[0] min mean std max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().std().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))
+            print("proposed[1] min mean std max:\n", round(proposed[:, 1].cpu().detach().min().item(), 7), round(proposed[:, 1].cpu().detach().mean().item(), 7), round(proposed[:, 1].cpu().detach().std().item(), 7), round(proposed[:, 1].cpu().detach().max().item(), 7))
             print()
 
-            print("proposed probabilities min mean max:\n", round(proposed_pi.cpu().detach().min().item(), 7), round(proposed_pi.cpu().detach().mean().item(), 7), round(proposed_pi.cpu().detach().max().item(), 7))
-            print("queried probabilities min mean max:\n", round(queried_pi.cpu().detach().min().item(), 7), round(queried_pi.cpu().detach().mean().item(), 7), round(queried_pi.cpu().detach().max().item(), 7))
+            print("proposed probabilities min mean std max:\n", round(proposed_pi.cpu().detach().min().item(), 7), round(proposed_pi.cpu().detach().mean().item(), 7), round(proposed_pi.cpu().detach().std().item(), 7), round(proposed_pi.cpu().detach().max().item(), 7))
+            print("queried probabilities min mean std max:\n", round(queried_pi.cpu().detach().min().item(), 7), round(queried_pi.cpu().detach().mean().item(), 7), round(queried_pi.cpu().detach().std().item(), 7), round(queried_pi.cpu().detach().max().item(), 7))
             print()
 
-            queried_actions = torch.Tensor(proposed_actions).squeeze()
-            print("queried[0] min mean max:\n", round(queried_actions[:, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, 0].cpu().detach().max().item(), 7))
-            print("queried[1] min mean max:\n", round(queried_actions[:, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, 1].cpu().detach().max().item(), 7))
+            print("queried[0] min mean std max:\n", round(queried_actions[:, :, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().max().item(), 7))
+            print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
             print()
 
             print("target value sample:\n", v_trace[:4].cpu().detach().numpy())

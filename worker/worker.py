@@ -49,6 +49,7 @@ class Worker(object):
         self.models_loc = models_loc
 
         self.server = redis.Redis("localhost")
+        self.instrument = instrument
         self.zeus = Zeus(instrument, granularity)
 
         self.time_states = []
@@ -63,7 +64,6 @@ class Worker(object):
         self.total_actual_reward = 0
 
         self.reward_tau = float(self.server.get("reward_tau").decode("utf-8"))
-        self.spread_reimbursement_ratio = float(self.server.get("spread_reimbursement_ratio").decode("utf-8"))
 
         self.window = networks.WINDOW
 
@@ -72,7 +72,7 @@ class Worker(object):
 
         self.test = test
         if self.test:
-            self.steps_before_trajectory = 1000
+            self.steps_before_trajectory = 500
         else:
             self.steps_before_trajectory = 500
         self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
@@ -103,12 +103,15 @@ class Worker(object):
             before = self.zeus.unrealized_balance()
             reward = 0
             if self.test:
-                # if torch.max(policy) > 0.5:
+                # if torch.max(policy) > 0.75:
                 #     action = torch.argmax(policy).item()
                 # else:
                 #     action = 2
                 # action = torch.argmax(policy).item()
                 action = torch.multinomial(policy, 1).item()
+                # queried_actions[0, 0] = 1
+                # queried_actions[0, 1] = 1
+                # action = np.random.randint(0, 2)
             else:
                 action = torch.multinomial(policy, 1).item()
 
@@ -143,16 +146,15 @@ class Worker(object):
                 # # to disincentivize holding
                 # reward -= 0.1
 
-            reward += (before - self.zeus.unrealized_balance()) * self.spread_reimbursement_ratio
             self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
-            reward += self.zeus.unrealized_balance() - self.prev_value
+            reward += (self.zeus.unrealized_balance() - self.prev_value) / (self.prev_value + 1e-3)
             self.prev_value = self.zeus.unrealized_balance()
             # print(action, reward)
             mu = policy[0, action].item()
             action_mu = p_actions.item() + 1e-9
 
             if self.test:
-                time.sleep(0.1)
+                # time.sleep(0.1)
                 reward_ema = self.server.get("test_reward_ema")
                 reward_emsd = self.server.get("test_reward_emsd")
                 if reward_ema != None:
