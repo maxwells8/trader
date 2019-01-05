@@ -314,13 +314,15 @@ class ProbabilisticProposer(nn.Module):
     def __init__(self):
         super(ProbabilisticProposer, self).__init__()
         self.d_out = 2
+        self.d_mixture = 8
 
-        self.n_layers = 8
+        self.n_layers = 4
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
-        self.layer_mu = nn.Linear(D_MODEL, self.d_out)
-        self.layer_sigma = nn.Linear(D_MODEL, self.d_out)
+        self.layer_mu = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
+        self.layer_sigma = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
+        self.layer_w = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
 
     def forward(self, market_encoding, return_params=False):
         for i in range(self.n_layers):
@@ -330,28 +332,35 @@ class ProbabilisticProposer(nn.Module):
                 pdf = self.layers[i](pdf) + pdf
             pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
             pdf = F.leaky_relu(pdf)
-        mu = self.layer_mu(pdf).view(-1, self.d_out)
-        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out))
-        x = self.inverse_cdf(torch.rand_like(mu), mu, sigma)
-        p_x = self.p(x, mu, sigma)
+        mu = self.layer_mu(pdf).view(-1, self.d_out, self.d_mixture)
+        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture))
+        w = torch.softmax(self.layer_w(pdf).view(-1, self.d_out, self.d_mixture), dim=2)
+        x = self.sample(w, mu, sigma)
+        p_x = self.p(x, w, mu, sigma)
 
         if return_params:
-            return x, p_x, mu, sigma
+            return x, p_x, w, mu, sigma
         else:
             return x, p_x
 
-    def p(self, x, mu, sigma):
-        x = x.view(-1, self.d_out)
+    def p(self, x, w, mu, sigma):
+        x = x.view(-1, self.d_out, 1)
         # probability density function for logit normal
-        p_x = (1 / (torch.sqrt(2 * math.pi * sigma ** 2) + 1e-9)) * \
+        p_x = (1 / (torch.sqrt(2 * math.pi * sigma ** 2 + 1e-9) + 1e-9)) * \
                 (1 / ((x + 1e-9) * (1 - x + 1e-9))) * \
                 torch.exp(-(torch.log(x / (1 - x + 1e-9) + 1e-9) - mu) ** 2 / (2 * sigma ** 2 + 1e-9))
         # getthing the combined probability
-        p_x = p_x.prod(1)
-        return p_x.view(-1, 1)
+        p_x = (w * p_x).sum(2)
+        return p_x.view(-1, self.d_out)
 
     def inverse_cdf(self, p, mu, sigma):
         return torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
+
+    def sample(self, w, mu, sigma):
+        p = torch.rand_like(mu)
+        samples = self.inverse_cdf(p, mu, sigma)
+        sample = (w * samples).sum(2).view(-1, self.d_out)
+        return sample
 
 
 class ActorCritic(nn.Module):
@@ -369,7 +378,7 @@ class ActorCritic(nn.Module):
         self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
         self.combined_initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.combined_initial_bias = nn.Parameter(torch.zeros(D_MODEL))
-        self.n_combined_layers = 8
+        self.n_combined_layers = 4
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
         self.combined_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
@@ -433,7 +442,7 @@ class EncoderToOthers(nn.Module):
         self.initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.initial_bias = nn.Parameter(torch.zeros(D_MODEL))
 
-        self.n_layers = 8
+        self.n_layers = 4
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])

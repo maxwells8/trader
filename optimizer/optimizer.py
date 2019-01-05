@@ -173,7 +173,6 @@ class Optimizer(object):
             t_eto = 0
             t_pn = 0
             t_acn = 0
-
             for i in range(1, self.trajectory_steps):
                 time_states_ = torch.cat(time_states[-window-i:-i], dim=1).cuda()
                 mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
@@ -185,30 +184,33 @@ class Optimizer(object):
                 market_encoding = self.MEN.forward(time_states_)
                 market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-i-1]).cuda())
                 queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
-                proposed, proposed_pi, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
-                # print(p_x_mu, p_x_sigma)
-                queried_pi = self.PN.p(queried.detach(), p_x_mu, p_x_sigma)
+                proposed, proposed_pi, p_x_w, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
+                queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
+                queried_pi_combined = queried_pi.prod(1).view(-1, 1)
                 policy, value = self.ACN.forward(market_encoding, queried)
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
                 queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
 
+                # reward is indexed at -i instead of -i-1 since the reward is delayed by one
                 r = torch.Tensor(reward[-i]).cuda().view(-1, 1)
 
-                delta_v = torch.min(self.max_rho, (pi_ / (mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9))) * (r + self.gamma * v_next - value)
-                c *= torch.min(self.max_c, (pi_ / (mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9)))
+                if i == self.trajectory_steps - 1:
+                    advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
+                    actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
+                    proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
+
+                    actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
+                    proposed_entropy_loss += (proposed_pi * torch.log(proposed_pi + 1e-9)).mean()
+                    # proposed_entropy_loss += (proposed * torch.log(proposed + 1e-9)).mean() # not exactly entropy, but ehh
+
+                delta_v = torch.min(self.max_rho, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9))) * (r + self.gamma * v_next - value)
+                c *= torch.min(self.max_c, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9)))
 
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
-                    advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
-                    actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
-                    proposed_v_loss += (-torch.log(queried_pi + 1e-9) * advantage_v.detach()).mean()
-
-                    actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
-                    proposed_entropy_loss += (proposed_pi * torch.log(proposed_pi + 1e-9)).mean()
-
                     critic_loss += F.l1_loss(value, v_trace)
 
                 v_next = value.detach()
@@ -223,12 +225,11 @@ class Optimizer(object):
             try:
                 assert torch.isnan(total_loss).sum() == 0
             except AssertionError:
-                print("proposed_entropy_loss", proposed_entropy_loss)
                 print("proposed_v_loss", proposed_v_loss)
+                print("proposed_entropy_loss", proposed_entropy_loss)
                 print("critic_loss", critic_loss)
                 print("actor_v_loss", actor_v_loss)
                 print("actor_entropy_loss", actor_entropy_loss)
-                print("value", value)
                 raise AssertionError("total loss is not 0")
             total_loss.backward()
             self.optimizer.step()
@@ -240,6 +241,7 @@ class Optimizer(object):
             prev_reward_emsd = reward_emsd
 
             try:
+                torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
                 torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
                 torch.save(self.PN.state_dict(), self.models_loc + "proposer.pt")
                 torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")

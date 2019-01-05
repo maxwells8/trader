@@ -28,8 +28,9 @@ if __name__ == "__main__":
         name = "test" + name
         global n_times
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
-
-        start = np.random.randint(1136073600, 1543622400)
+        start = np.random.randint(1136073600, 1546300800)
+        # instrument = "EUR_USD"
+        # start = np.random.randint(1546214400, 1546300800)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, True))
         process.start()

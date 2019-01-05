@@ -84,7 +84,10 @@ class Worker(object):
     def add_bar(self, bar):
         time_state = [[[bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]]]
 
-        self.time_states.append(time_state)
+        if len(self.time_states) == 0 or time_state != self.time_states[-1]:
+            self.time_states.append(time_state)
+        else:
+            return
 
         if len(self.time_states) >= self.window:
             percent_in = self.zeus.position_size() / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
@@ -99,9 +102,8 @@ class Worker(object):
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
             queried_actions, p_actions = self.proposer.forward(market_encoding)
             policy, value = self.actor_critic.forward(market_encoding, queried_actions)
+            p_actions = p_actions.prod(1).view(-1, 1)
 
-            before = self.zeus.unrealized_balance()
-            reward = 0
             if self.test:
                 # if torch.max(policy) > 0.75:
                 #     action = torch.argmax(policy).item()
@@ -114,6 +116,13 @@ class Worker(object):
                 # action = np.random.randint(0, 2)
             else:
                 action = torch.multinomial(policy, 1).item()
+
+            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
+            reward = (self.zeus.unrealized_balance() - self.prev_value) / 2000
+            self.prev_value = self.zeus.unrealized_balance()
+            # print(action, reward)
+            mu = policy[0, action].item()
+            action_mu = p_actions.item() + 1e-9
 
             if action == 0:
                 if self.zeus.position_size() < 0:
@@ -142,16 +151,6 @@ class Worker(object):
                 else:
                     amount = int(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available()))
                     self.zeus.place_trade(amount, "Short")
-            # else:
-                # # to disincentivize holding
-                # reward -= 0.1
-
-            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
-            reward += (self.zeus.unrealized_balance() - self.prev_value) / (self.prev_value + 1e-3)
-            self.prev_value = self.zeus.unrealized_balance()
-            # print(action, reward)
-            mu = policy[0, action].item()
-            action_mu = p_actions.item() + 1e-9
 
             if self.test:
                 # time.sleep(0.1)
@@ -185,13 +184,6 @@ class Worker(object):
                                         r=round(self.total_actual_reward, 2),
                                         ema=round(reward_ema, 2),
                                         emsd=round(reward_emsd, 2)))
-
-            # adding steps_since_trade to help it learn
-            if action in [0, 1]:
-                placed_order = [action, queried_actions[0, action].item()]
-                steps_since_trade = 0
-            else:
-                placed_order = [action]
 
             if not self.test:
                 reward_ema = self.server.get("reward_ema").decode("utf-8")
