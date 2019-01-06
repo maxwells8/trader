@@ -162,7 +162,7 @@ class Worker(object):
                 else:
                     reward_ema = 0
                     reward_emsd = 0
-
+                    
                 print("step: {s} \
                 \npercent in: {p_in} \
                 \naction: {a} \

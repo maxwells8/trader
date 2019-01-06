@@ -46,6 +46,8 @@ class Optimizer(object):
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
             torch.save(self.PN.state_dict(), self.models_loc + 'proposer.pt')
             torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
+        self.ACN_ = ActorCritic().cuda()
+        self.ACN_.load_state_dict(self.ACN.state_dict())
 
         self.server = redis.Redis("localhost")
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
@@ -199,6 +201,9 @@ class Optimizer(object):
                 if i == self.trajectory_steps - 1:
                     advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
+
+                    # _, target_value = self.ACN_.forward(market_encoding, queried)
+                    # proposed_v_loss += (-target_value).mean()
                     proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
@@ -268,6 +273,7 @@ class Optimizer(object):
                     self.prioritized_experience.append(experience)
 
             self.queued_experience = []
+            self.ACN_.load_state_dict(self.ACN.state_dict())
             torch.cuda.empty_cache()
 
             print('-----------------------------------------------------------')

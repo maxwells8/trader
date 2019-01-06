@@ -357,8 +357,16 @@ class ProbabilisticProposer(nn.Module):
         return torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
 
     def sample(self, w, mu, sigma):
-        p = torch.rand_like(mu)
-        samples = self.inverse_cdf(p, mu, sigma)
+        """
+        this isn't how you should sample from a mixture model, but it's fine as
+        long as self.d_mixture == 1
+
+        figuring out how to differentiably sample from a mixture model would be
+        nice
+        """
+        i = torch.multinomial(w.view(-1, self.d_mixture), 1).view(w.size()[0], self.d_out, 1)
+        p = torch.rand(w.size()[0], self.d_out, 1, device=w.device)
+        samples = self.inverse_cdf(p, mu.gather(2, i), sigma.gather(2, i))
         sample = (w * samples).sum(2).view(-1, self.d_out)
         return sample
 

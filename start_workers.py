@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                if server.llen("experience") < 8192:
+                if server.llen("experience") < 1024:
                     print("starting worker")
                     processes[i] = start_process(str(i))
                     times[i] = time.time()
