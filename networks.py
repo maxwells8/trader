@@ -351,19 +351,13 @@ class ProbabilisticProposer(nn.Module):
                 torch.exp(-(torch.log(x / (1 - x + 1e-9) + 1e-9) - mu) ** 2 / (2 * sigma ** 2 + 1e-9))
         # getthing the combined probability
         p_x = (w * p_x).sum(2)
+        p_x = torch.min(p_x, 1e6 * torch.ones(1, device=w.device))
         return p_x.view(-1, self.d_out)
 
     def inverse_cdf(self, p, mu, sigma):
         return torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
 
     def sample(self, w, mu, sigma):
-        """
-        this isn't how you should sample from a mixture model, but it's fine as
-        long as self.d_mixture == 1
-
-        figuring out how to differentiably sample from a mixture model would be
-        nice
-        """
         i = torch.multinomial(w.view(-1, self.d_mixture), 1).view(w.size()[0], self.d_out, 1)
         p = torch.rand(w.size()[0], self.d_out, 1, device=w.device)
         samples = self.inverse_cdf(p, mu.gather(2, i), sigma.gather(2, i))
@@ -404,7 +398,7 @@ class ActorCritic(nn.Module):
         self.critic_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
 
-    def forward(self, market_encoding, proposed_actions, sigma=1):
+    def forward(self, market_encoding, proposed_actions, temp=1):
 
         x = torch.cat([
                     market_encoding.view(-1, D_MODEL),
@@ -426,7 +420,7 @@ class ActorCritic(nn.Module):
             policy = layer_norm(policy, 1 + self.actor_gains[i], self.actor_biases[i])
             policy = F.leaky_relu(policy)
 
-        policy = self.actor_out(policy) * sigma
+        policy = self.actor_out(policy) / temp
         policy = self.actor_softmax(policy)
 
         for i in range(self.n_critic_layers):

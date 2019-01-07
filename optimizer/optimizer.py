@@ -50,6 +50,7 @@ class Optimizer(object):
         self.ACN_.load_state_dict(self.ACN.state_dict())
 
         self.server = redis.Redis("localhost")
+        self.actor_temp_cooldown = float(self.server.get("actor_temp_cooldown").decode("utf-8"))
         self.gamma = float(self.server.get("gamma").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
         self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
@@ -80,6 +81,7 @@ class Optimizer(object):
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
+            self.actor_temp = checkpoint['actor_temp']
             self.server.set("spread_reimbursement_ratio", checkpoint['spread_reimbursement_ratio'])
 
         except:
@@ -89,8 +91,9 @@ class Optimizer(object):
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
-            self.start_n_samples = 0
             self.start_step = 0
+            self.start_n_samples = 0
+            self.actor_temp = 20
             spread_reimbursement_ratio = 0
             self.server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
             cur_state = {
@@ -100,6 +103,8 @@ class Optimizer(object):
                 'optimizer':self.optimizer.state_dict()
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
+
+        self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
         prev_reward_ema = None
@@ -216,7 +221,26 @@ class Optimizer(object):
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
-                    critic_loss += F.l1_loss(value, v_trace)
+                    critic_loss += nn.MSELoss()(value, v_trace.detach())
+
+                try:
+                    assert queried_pi.min() > 0
+                except AssertionError:
+                    print("queried", queried)
+                    print("queried_pi:", queried_pi)
+                    print("queried_mu:", queried_mu)
+                    raise AssertionError("queried_pi > 0")
+                try:
+                    assert torch.isnan(v_trace).sum() == 0
+                except AssertionError:
+                    print("value:", value)
+                    print("v_trace:", v_trace)
+                    print("delta_v:", delta_v)
+                    print("queried_pi:", queried_pi)
+                    print("queried_mu:", queried_mu)
+                    print("pi:", pi_)
+                    print("mu:", mu_)
+                    raise AssertionError("v_trace is nan")
 
                 v_next = value.detach()
 
@@ -272,6 +296,7 @@ class Optimizer(object):
                 elif len(self.prioritized_experience) < self.prioritized_batch_size:
                     self.prioritized_experience.append(experience)
 
+            self.server.set("actor_temp", 1 + (self.actor_temp - 1) * self.actor_temp_cooldown ** step)
             self.queued_experience = []
             self.ACN_.load_state_dict(self.ACN.state_dict())
             torch.cuda.empty_cache()
@@ -298,9 +323,14 @@ class Optimizer(object):
             print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
             print()
 
-            print("target value sample:\n", v_trace[:4].cpu().detach().numpy())
-            print("guessed value sample:\n", value[:4].cpu().detach().numpy())
+            difference = v_trace.detach() - value.detach()
+            print("value min mean std max:\n", round(value.cpu().detach().min().item(), 7), round(value.cpu().detach().mean().item(), 7), round(value.cpu().detach().std().item(), 7), round(value.cpu().detach().max().item(), 7))
+            print("difference mean, std:\n", round(dif.cpu().detach().mean().item(), 7), round(dif.cpu().detach().std().item(), 7))
             print()
 
-            print("weighted critic loss:", round(float(critic_loss * self.critic_weight), 5))
+            print("weighted critic loss:", round(float(critic_loss * self.critic_weight), 7))
+            print("weighted actor v loss:", round(float(actor_v_loss * self.actor_v_weight), 7))
+            print("weighted actor entropy loss:", round(float(actor_entropy_loss * self.actor_entropy_weight), 7))
+            print("weighted proposer v loss:", round(float(proposed_v_loss * self.proposed_v_weight), 7))
+            print("weighted proposer entropy loss:", round(float(proposed_entropy_loss * self.proposed_entropy_weight), 7))
             print('-----------------------------------------------------------')

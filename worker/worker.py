@@ -62,13 +62,14 @@ class Worker(object):
         self.rewards = []
 
         self.total_actual_reward = 0
-
         self.reward_tau = float(self.server.get("reward_tau").decode("utf-8"))
 
         self.window = networks.WINDOW
 
         self.start = start
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
+
+        self.actor_temp = float(self.server.get("actor_temp").decode("utf-8"))
 
         self.test = test
         if self.test:
@@ -101,7 +102,10 @@ class Worker(object):
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
             queried_actions, p_actions = self.proposer.forward(market_encoding)
-            policy, value = self.actor_critic.forward(market_encoding, queried_actions)
+            if self.test:
+                policy, value = self.actor_critic.forward(market_encoding, queried_actions)
+            else:
+                policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
             p_actions = p_actions.prod(1).view(-1, 1)
 
             if self.test:
@@ -162,7 +166,7 @@ class Worker(object):
                 else:
                     reward_ema = 0
                     reward_emsd = 0
-                    
+
                 print("step: {s} \
                 \npercent in: {p_in} \
                 \naction: {a} \
@@ -250,7 +254,7 @@ class Worker(object):
             n_seconds = self.n_steps_left * 60
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
-        print("time: {time}, total rewards: {reward}, steps: {steps}".format(time=time.time()-t0, reward=self.total_actual_reward, steps=self.steps_before_trajectory))
+        print("time: {time}, total rewards: {reward}, actor temp: {actor_temp}, steps: {steps}".format(time=time.time()-t0, reward=self.total_actual_reward, actor_temp=round(self.actor_temp, 5), steps=self.steps_before_trajectory))
         if self.test:
             reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
             reward_ema = self.server.get("test_reward_ema")
