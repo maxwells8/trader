@@ -117,7 +117,6 @@ class CNNEncoder(nn.Module):
         x = self.fc2(x)
         x = layer_norm(x, 1 + self.fc2_gain, self.fc2_bias)
         x = F.leaky_relu(x)
-
         return x
 
 class MarketEncoder(nn.Module):
@@ -333,7 +332,7 @@ class ProbabilisticProposer(nn.Module):
             pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
             pdf = F.leaky_relu(pdf)
         mu = self.layer_mu(pdf).view(-1, self.d_out, self.d_mixture)
-        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture))
+        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)) + 1e-9
         w = torch.softmax(self.layer_w(pdf).view(-1, self.d_out, self.d_mixture), dim=2)
         x = self.sample(w, mu, sigma)
         p_x = self.p(x, w, mu, sigma)
@@ -345,17 +344,24 @@ class ProbabilisticProposer(nn.Module):
 
     def p(self, x, w, mu, sigma):
         x = x.view(-1, self.d_out, 1)
+        x = torch.min(torch.max(x,
+                                torch.zeros(1, device=x.device) + 1e-6),
+                      torch.ones(1, device=x.device) - 1e-6)
         # probability density function for logit normal
-        p_x = (1 / (torch.sqrt(2 * math.pi * sigma ** 2 + 1e-9) + 1e-9)) * \
-                (1 / ((x + 1e-9) * (1 - x + 1e-9))) * \
-                torch.exp(-(torch.log(x / (1 - x + 1e-9) + 1e-9) - mu) ** 2 / (2 * sigma ** 2 + 1e-9))
+        p_x = (1 / (torch.sqrt(2 * math.pi * sigma ** 2))) * \
+                (1 / (x * (1 - x))) * \
+                torch.exp(-(torch.log(x / (1 - x)) - mu) ** 2 / (2 * sigma ** 2))
         # getthing the combined probability
         p_x = (w * p_x).sum(2)
-        p_x = torch.min(p_x, 1e6 * torch.ones(1, device=w.device))
         return p_x.view(-1, self.d_out)
 
     def inverse_cdf(self, p, mu, sigma):
-        return torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
+        # sampling from a logit normal distribution
+        x = torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
+        x = torch.min(torch.max(x,
+                                torch.zeros(1, device=x.device) + 1e-6),
+                      torch.ones(1, device=x.device) - 1e-6)
+        return x
 
     def sample(self, w, mu, sigma):
         i = torch.multinomial(w.view(-1, self.d_mixture), 1).view(w.size()[0], self.d_out, 1)

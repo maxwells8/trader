@@ -69,7 +69,8 @@ class Worker(object):
         self.start = start
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
-        self.actor_temp = float(self.server.get("actor_temp").decode("utf-8"))
+        base_temp = float(self.server.get("actor_temp").decode("utf-8"))
+        self.actor_temp = max(np.random.normal(base_temp, 1), 0.1)
 
         self.test = test
         if self.test:
@@ -97,18 +98,16 @@ class Worker(object):
             mean = input_time_states[:, 0, :4].mean()
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
+            assert torch.isnan(input_time_states).sum() == 0
             spread_normalized = bar.spread / std
 
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
             queried_actions, p_actions = self.proposer.forward(market_encoding)
-            if self.test:
-                policy, value = self.actor_critic.forward(market_encoding, queried_actions)
-            else:
-                policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
             p_actions = p_actions.prod(1).view(-1, 1)
 
             if self.test:
+                policy, value = self.actor_critic.forward(market_encoding, queried_actions, 1)
                 # if torch.max(policy) > 0.75:
                 #     action = torch.argmax(policy).item()
                 # else:
@@ -119,7 +118,9 @@ class Worker(object):
                 # queried_actions[0, 1] = 1
                 # action = np.random.randint(0, 2)
             else:
+                policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
                 action = torch.multinomial(policy, 1).item()
+
 
             self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
             reward = (self.zeus.unrealized_balance() - self.prev_value) / 2000

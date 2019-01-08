@@ -82,7 +82,6 @@ class Optimizer(object):
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
             self.actor_temp = checkpoint['actor_temp']
-            self.server.set("spread_reimbursement_ratio", checkpoint['spread_reimbursement_ratio'])
 
         except:
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
@@ -93,17 +92,16 @@ class Optimizer(object):
                                         weight_decay=self.weight_penalty)
             self.start_step = 0
             self.start_n_samples = 0
-            self.actor_temp = 20
-            spread_reimbursement_ratio = 0
-            self.server.set("spread_reimbursement_ratio", spread_reimbursement_ratio)
+            self.actor_temp = 10
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
-                'spread_reimbursement_ratio':spread_reimbursement_ratio,
+                'actor_temp':self.actor_temp,
                 'optimizer':self.optimizer.state_dict()
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
 
+        self.original_actor_temp = 10
         self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
@@ -221,7 +219,7 @@ class Optimizer(object):
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
-                    critic_loss += nn.MSELoss()(value, v_trace.detach())
+                    critic_loss += F.l1_loss(value, v_trace.detach())
 
                 try:
                     assert queried_pi.min() > 0
@@ -260,8 +258,25 @@ class Optimizer(object):
                 print("actor_v_loss", actor_v_loss)
                 print("actor_entropy_loss", actor_entropy_loss)
                 raise AssertionError("total loss is not 0")
+
             total_loss.backward()
             self.optimizer.step()
+
+            for param in self.MEN.named_parameters():
+                print(param)
+                try:
+                    assert torch.isnan(param[1]).sum() == 0
+                except AssertionError:
+                    print("param:", param)
+                    print("value:", value)
+                    print("v_trace:", v_trace)
+                    print("delta_v:", delta_v)
+                    print("queried_pi:", queried_pi)
+                    print("queried_mu:", queried_mu)
+                    print("pi:", pi_)
+                    print("mu:", mu_)
+                    print("grad:", param[1].grad)
+                    raise AssertionError("param is nan")
 
             step += 1
             n_samples += len(self.queued_experience)
@@ -277,7 +292,7 @@ class Optimizer(object):
                 cur_state = {
                     'n_samples':n_samples,
                     'steps':step,
-                    'spread_reimbursement_ratio':self.server.get("spread_reimbursement_ratio"),
+                    'actor_temp':self.actor_temp,
                     'optimizer':self.optimizer.state_dict()
                 }
                 torch.save(cur_state, self.models_loc + 'rl_train.pt')
@@ -296,7 +311,8 @@ class Optimizer(object):
                 elif len(self.prioritized_experience) < self.prioritized_batch_size:
                     self.prioritized_experience.append(experience)
 
-            self.server.set("actor_temp", 1 + (self.actor_temp - 1) * self.actor_temp_cooldown ** step)
+            self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** step
+            self.server.set("actor_temp", self.actor_temp)
             self.queued_experience = []
             self.ACN_.load_state_dict(self.ACN.state_dict())
             torch.cuda.empty_cache()
