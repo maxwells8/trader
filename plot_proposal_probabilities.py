@@ -14,11 +14,14 @@ PN.load_state_dict(torch.load('./models/proposer.pt'))
 MEN = MEN.cpu()
 ETO = ETO.cpu()
 PN = PN.cpu()
+MEN.eval()
+ETO.eval()
+PN.eval()
 
-instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
-start = np.random.randint(1136073600, 1546300800)
-# instrument = "EUR_USD"
-# start = np.random.randint(1546214400, 1546300800)
+# instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+# start = np.random.randint(1136073600, 1546300800)
+instrument = "EUR_USD"
+start = np.random.randint(1546214400, 1546819200)
 
 zeus = Zeus(instrument, "M1")
 

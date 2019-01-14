@@ -69,16 +69,19 @@ class CNNEncoder(nn.Module):
         self.conv1 = nn.Conv1d(in_channels=D_BAR,
                                 out_channels=self.n_channels[0],
                                 kernel_size=self.kernel_sizes[0])
+        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0])
+
         self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
                                 out_channels=self.n_channels[1],
                                 kernel_size=self.kernel_sizes[1])
+        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1])
+
         self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
                                 out_channels=self.n_channels[2],
                                 kernel_size=self.kernel_sizes[2])
+        self.conv3_bn = nn.BatchNorm1d(self.n_channels[2])
 
         self.max_pool = nn.MaxPool1d(self.pool_kernel_size)
-
-        self.fc1 = nn.Linear(D_MODEL, self.fc1_out_dim)
 
         self.L_in = WINDOW
         for k in self.kernel_sizes:
@@ -86,9 +89,12 @@ class CNNEncoder(nn.Module):
             self.L_in = math.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
         self.L_in = int(self.L_in)
 
-        self.fc2 = nn.Linear(int(self.L_in) * self.fc1_out_dim, D_MODEL)
-        self.fc2_gain = nn.Parameter(torch.zeros(D_MODEL))
-        self.fc2_bias = nn.Parameter(torch.zeros(D_MODEL))
+        self.n_fc_layers = 1
+        begin_dim = self.L_in * self.n_channels[-1]
+        end_dim = D_MODEL
+        # scale down the layer size linearly from begin_dim to end_dim
+        self.fc_layers = nn.ModuleList([nn.Linear(int((end_dim - begin_dim) * n / self.n_fc_layers + begin_dim), int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
+        self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
 
     def forward(self, market_values):
         time_states = []
@@ -98,25 +104,27 @@ class CNNEncoder(nn.Module):
         time_states = torch.cat(time_states, dim=2)
 
         x = self.conv1(time_states)
+        x = self.conv1_bn(x)
         x = self.max_pool(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
+        x = self.conv2_bn(x)
         x = self.max_pool(x)
         x = F.leaky_relu(x)
 
         x = self.conv3(x)
+        x = self.conv3_bn(x)
         x = self.max_pool(x)
         x = F.leaky_relu(x)
 
-        x = x.transpose(1, 2)
-        x = self.fc1(x)
-        x = x.squeeze().view(-1, self.L_in * self.fc1_out_dim)
-        x = F.leaky_relu(x)
+        x = x.squeeze().view(-1, self.L_in * self.n_channels[-1])
 
-        x = self.fc2(x)
-        x = layer_norm(x, 1 + self.fc2_gain, self.fc2_bias)
-        x = F.leaky_relu(x)
+        for i in range(self.n_fc_layers):
+            x = self.fc_layers[i](x)
+            x = self.fc_bn[i](x)
+            x = F.leaky_relu(x)
+
         return x
 
 class MarketEncoder(nn.Module):
@@ -317,6 +325,7 @@ class ProbabilisticProposer(nn.Module):
 
         self.n_layers = 4
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
+        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.layer_mu = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
@@ -326,13 +335,16 @@ class ProbabilisticProposer(nn.Module):
     def forward(self, market_encoding, return_params=False):
         for i in range(self.n_layers):
             if i == 0:
-                pdf = self.layers[i](market_encoding.view(-1, D_MODEL)) + market_encoding.view(-1, D_MODEL)
+                res = market_encoding.view(-1, D_MODEL)
+                pdf = self.layers[i](market_encoding.view(-1, D_MODEL))
             else:
-                pdf = self.layers[i](pdf) + pdf
-            pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
+                res = pdf
+                pdf = self.layers[i](pdf)
+            # pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
+            pdf = self.bns[i](pdf) + res
             pdf = F.leaky_relu(pdf)
         mu = self.layer_mu(pdf).view(-1, self.d_out, self.d_mixture)
-        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)) + 1e-9
+        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)) + 1e-5
         w = torch.softmax(self.layer_w(pdf).view(-1, self.d_out, self.d_mixture), dim=2)
         x = self.sample(w, mu, sigma)
         p_x = self.p(x, w, mu, sigma)
@@ -384,15 +396,18 @@ class ActorCritic(nn.Module):
         self.d_action = 2
 
         self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
+        self.combined_initial_bn = nn.BatchNorm1d(D_MODEL)
         self.combined_initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.combined_initial_bias = nn.Parameter(torch.zeros(D_MODEL))
         self.n_combined_layers = 4
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
+        self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
         self.combined_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
 
         self.n_actor_layers = 4
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
+        self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_actor_layers)])
         self.actor_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, 3)
@@ -400,6 +415,7 @@ class ActorCritic(nn.Module):
 
         self.n_critic_layers = 4
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
+        self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_critic_layers)])
         self.critic_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_critic_layers)])
         self.critic_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
@@ -410,20 +426,26 @@ class ActorCritic(nn.Module):
                     market_encoding.view(-1, D_MODEL),
                     (proposed_actions + 1e-9).log().view(-1, self.d_action)
                     ], 1)
-        x = self.combined_initial(x) + market_encoding.view(-1, D_MODEL)
-        x = layer_norm(x, 1 + self.combined_initial_gain, self.combined_initial_bias)
+        x = self.combined_initial(x)
+        x = self.combined_initial_bn(x) + market_encoding.view(-1, D_MODEL)
+        # x = layer_norm(x, 1 + self.combined_initial_gain, self.combined_initial_bias)
         x = F.leaky_relu(x)
         for i in range(self.n_combined_layers):
-            x = self.combined_layers[i](x) + x
-            x = layer_norm(x, 1 + self.combined_gains[i], self.combined_biases[i])
+            res = x
+            x = self.combined_layers[i](x)
+            x = self.combined_bns[i](x) + res
+            # x = layer_norm(x, 1 + self.combined_gains[i], self.combined_biases[i])
             x = F.leaky_relu(x)
 
         for i in range(self.n_actor_layers):
             if i == 0:
-                policy = self.actor_layers[i](x) + x
+                res = x
+                policy = self.actor_layers[i](x)
             else:
-                policy = self.actor_layers[i](policy) + policy
-            policy = layer_norm(policy, 1 + self.actor_gains[i], self.actor_biases[i])
+                res = policy
+                policy = self.actor_layers[i](policy)
+            # policy = layer_norm(policy, 1 + self.actor_gains[i], self.actor_biases[i])
+            policy = self.actor_bns[i](policy) + res
             policy = F.leaky_relu(policy)
 
         policy = self.actor_out(policy) / temp
@@ -431,10 +453,13 @@ class ActorCritic(nn.Module):
 
         for i in range(self.n_critic_layers):
             if i == 0:
-                critic = self.critic_layers[i](x) + x
+                res = x
+                critic = self.critic_layers[i](x)
             else:
-                critic = self.critic_layers[i](critic) + critic
-            critic = layer_norm(critic, 1 + self.critic_gains[i], self.critic_biases[i])
+                res = critic
+                critic = self.critic_layers[i](critic)
+            # critic = layer_norm(critic, 1 + self.critic_gains[i], self.critic_biases[i])
+            critic = self.critic_bns[i](critic) + res
             critic = F.leaky_relu(critic)
 
         critic = self.critic_out(critic)
@@ -447,11 +472,13 @@ class EncoderToOthers(nn.Module):
     def __init__(self):
         super(EncoderToOthers, self).__init__()
         self.initial_layer = nn.Linear(D_MODEL + 3, D_MODEL)
+        self.initial_bn = nn.BatchNorm1d(D_MODEL)
         self.initial_gain = nn.Parameter(torch.zeros(D_MODEL))
         self.initial_bias = nn.Parameter(torch.zeros(D_MODEL))
 
         self.n_layers = 4
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
+        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
         self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
 
@@ -463,12 +490,15 @@ class EncoderToOthers(nn.Module):
                     percent_in.view(-1, 1)
                     ], 1)
 
-        x = self.initial_layer(x) + encoding.view(-1, D_MODEL)
+        x = self.initial_layer(x)
+        x = self.initial_bn(x) + encoding.view(-1, D_MODEL)
         x = F.leaky_relu(x)
-        x = layer_norm(x, 1 + self.initial_gain, self.initial_bias)
+        # x = layer_norm(x, 1 + self.initial_gain, self.initial_bias)
         for i in range(self.n_layers):
-            x = self.layers[i](x) + x
-            x = layer_norm(x, 1 + self.gains[i], self.biases[i])
+            res = x
+            x = self.layers[i](x)
+            # x = layer_norm(x, 1 + self.gains[i], self.biases[i])
+            x = self.bns[i](x) + res
             x = F.leaky_relu(x)
 
         return x

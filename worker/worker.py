@@ -70,7 +70,9 @@ class Worker(object):
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
         base_temp = float(self.server.get("actor_temp").decode("utf-8"))
-        self.actor_temp = max(np.random.normal(base_temp, 1), 0.1)
+        self.actor_temp = np.random.exponential(base_temp / np.log(2))
+
+        self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
 
         self.test = test
         if self.test:
@@ -82,6 +84,10 @@ class Worker(object):
         self.steps_since_push = 0
 
         self.prev_value = self.zeus.unrealized_balance()
+        self.prev_queried = None
+        self.prev_w = None
+        self.prev_mu = None
+        self.prev_sigma = None
 
     def add_bar(self, bar):
         time_state = [[[bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]]]
@@ -103,20 +109,39 @@ class Worker(object):
 
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
-            queried_actions, p_actions = self.proposer.forward(market_encoding)
+            if np.random.rand() < self.p_new_proposal or len(self.time_states) == self.window:
+                queried_actions, p_actions, p_a_w, p_a_mu, p_a_sigma = self.proposer.forward(market_encoding, True)
+                self.prev_queried = queried_actions
+                self.prev_w = p_a_w
+                self.prev_mu = p_a_mu
+                self.prev_sigma = p_a_sigma
+            else:
+                queried_actions = self.prev_queried
+                p_actions = self.proposer.p(queried_actions, self.prev_w, self.prev_mu, self.prev_sigma)
+
             p_actions = p_actions.prod(1).view(-1, 1)
 
             if self.test:
+                # if queried_actions[0, 0].item() > 0.5:
+                #     queried_actions[0, 0] = 1
+                # else:
+                #     queried_actions[0, 0] = 0
+                #
+                #     if queried_actions[0, 1].item() > 0.5:
+                #         queried_actions[0, 1] = 1
+                #     else:
+                #         queried_actions[0, 1] = 0
+
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, 1)
+
                 # if torch.max(policy) > 0.75:
                 #     action = torch.argmax(policy).item()
                 # else:
                 #     action = 2
                 action = torch.argmax(policy).item()
                 # action = torch.multinomial(policy, 1).item()
-                # queried_actions[0, 0] = 1
-                # queried_actions[0, 1] = 1
                 # action = np.random.randint(0, 2)
+
             else:
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
                 action = torch.multinomial(policy, 1).item()
@@ -250,6 +275,11 @@ class Worker(object):
         torch.cuda.empty_cache()
 
     def run(self):
+        self.market_encoder.eval()
+        self.encoder_to_others.eval()
+        self.proposer.eval()
+        self.actor_critic.eval()
+
         t0 = time.time()
         while self.n_steps_left > 0:
             n_seconds = self.n_steps_left * 60

@@ -92,7 +92,7 @@ class Optimizer(object):
                                         weight_decay=self.weight_penalty)
             self.start_step = 0
             self.start_n_samples = 0
-            self.actor_temp = 10
+            self.actor_temp = 5
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
@@ -101,10 +101,16 @@ class Optimizer(object):
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
 
-        self.original_actor_temp = 10
+        self.original_actor_temp = 5
         self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
+        self.MEN.train()
+        self.ETO.train()
+        self.PN.train()
+        self.ACN.train()
+        self.ACN_.train()
+
         prev_reward_ema = None
         prev_reward_emsd = None
         n_samples = self.start_n_samples
@@ -219,25 +225,32 @@ class Optimizer(object):
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
-                    critic_loss += F.l1_loss(value, v_trace.detach())
+                    critic_loss += nn.MSELoss()(value, v_trace.detach())
 
                 try:
-                    assert queried_pi.min() > 0
+                    assert torch.isnan(queried_pi).sum() == 0
                 except AssertionError:
-                    print("queried", queried)
-                    print("queried_pi:", queried_pi)
-                    print("queried_mu:", queried_mu)
+                    for i in range(len(queried_pi[0])):
+                        if torch.isnan(queried_pi[0, i]).sum() > 0:
+                            print("p_x_w:", p_x_w[0, i])
+                            print("p_x_mu:", p_x_mu[0, i])
+                            print("p_x_sigma:", p_x_sigma[0, i])
+                            print("queried:", queried[0, i])
+                            print("queried_pi:", queried_pi[0, i])
+                            print("queried_mu:", queried_mu[0, i])
                     raise AssertionError("queried_pi > 0")
                 try:
                     assert torch.isnan(v_trace).sum() == 0
                 except AssertionError:
-                    print("value:", value)
-                    print("v_trace:", v_trace)
-                    print("delta_v:", delta_v)
-                    print("queried_pi:", queried_pi)
-                    print("queried_mu:", queried_mu)
-                    print("pi:", pi_)
-                    print("mu:", mu_)
+                    for i in range(len(v_trace[0])):
+                        if torch.isnan(v_trace[0, i]).sum() > 0:
+                            print("value:", value[0, i])
+                            print("v_trace:", v_trace[0, i])
+                            print("delta_v:", delta_v[0, i])
+                            print("queried_pi:", queried_pi[0, i])
+                            print("queried_mu:", queried_mu[0, i])
+                            print("pi:", pi_[0, i])
+                            print("mu:", mu_[0, i])
                     raise AssertionError("v_trace is nan")
 
                 v_next = value.detach()
@@ -263,7 +276,6 @@ class Optimizer(object):
             self.optimizer.step()
 
             for param in self.MEN.named_parameters():
-                print(param)
                 try:
                     assert torch.isnan(param[1]).sum() == 0
                 except AssertionError:
@@ -339,9 +351,8 @@ class Optimizer(object):
             print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
             print()
 
-            difference = v_trace.detach() - value.detach()
             print("value min mean std max:\n", round(value.cpu().detach().min().item(), 7), round(value.cpu().detach().mean().item(), 7), round(value.cpu().detach().std().item(), 7), round(value.cpu().detach().max().item(), 7))
-            print("difference mean, std:\n", round(dif.cpu().detach().mean().item(), 7), round(dif.cpu().detach().std().item(), 7))
+            print("v_trace min mean std max:\n", round(v_trace.cpu().detach().min().item(), 7), round(v_trace.cpu().detach().mean().item(), 7), round(v_trace.cpu().detach().std().item(), 7), round(v_trace.cpu().detach().max().item(), 7))
             print()
 
             print("weighted critic loss:", round(float(critic_loss * self.critic_weight), 7))
