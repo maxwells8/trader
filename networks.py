@@ -19,7 +19,7 @@ class CNNRelationalEncoder(nn.Module):
         super(CNNRelationalEncoder, self).__init__()
 
         self.n_channels = [int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
-        self.kernel_sizes = [3, 3, 3]
+        self.kernel_sizes = [7, 5, 3]
         self.pool_kernel_size = 2
         self.n_tot_entities = 128
         self.d_e = int(D_MODEL / 2)
@@ -57,14 +57,52 @@ class CNNRelationalEncoder(nn.Module):
         self.init_non_pos_vertices = torch.rand(self.n_tot_entities - self.n_pos_entities, self.d_v, requires_grad=True)
         self.init_u = torch.rand(self.d_u, requires_grad=True)
 
+
+class CNNResEncoder(nn.Module):
+    def __init__(self):
+        super(CNNResEncoder, self).__init__()
+
+        self.n_blocks = [1, 2, 2, 2]
+        self.n_channels = [int(D_MODEL / 8), int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3, 3, 3]
+
+        self.sequence = nn.Sequential()
+        for i in range(len(self.n_blocks)):
+            name = 'stage' + str(i)
+            n_blocks = self.n_blocks[i]
+            in_channels = self.n_channels[i-1] if i > 0 else D_BAR
+            out_channels = self.n_channels[i]
+            kernel_size = self.kernel_sizes[i]
+            self.sequence.add_module(
+                name,
+                self._make_stage(n_blocks, in_channels, out_channels, kernel_size)
+            )
+
+    def _make_stage(self, n_blocks, in_channels, out_channels, kernel_size):
+        stage = nn.Sequential()
+        for i in range(n_blocks):
+            name = 'block' + str(i)
+            in_channels_ = in_channels
+            out_channels_ = in_channels if i != n_blocks - 1 else out_channels
+            stage.add_module(
+                name,
+                self._make_block(in_channels_, out_channels_, kernel_size)
+            )
+
+        return stage
+
+    def _make_block(self, in_channels, out_channels, kernel_size):
+        block = nn.Sequential()
+        return block
+
+
 class CNNEncoder(nn.Module):
     def __init__(self):
         super(CNNEncoder, self).__init__()
 
-        self.n_channels = [int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
-        self.kernel_sizes = [3, 3, 3]
+        self.n_channels = [int(D_MODEL / 8), int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3, 3, 3]
         self.pool_kernel_size = 2
-        self.fc1_out_dim = int(D_MODEL / 2)
 
         self.conv1 = nn.Conv1d(in_channels=D_BAR,
                                 out_channels=self.n_channels[0],
@@ -81,7 +119,12 @@ class CNNEncoder(nn.Module):
                                 kernel_size=self.kernel_sizes[2])
         self.conv3_bn = nn.BatchNorm1d(self.n_channels[2])
 
-        self.max_pool = nn.MaxPool1d(self.pool_kernel_size)
+        self.conv4 = nn.Conv1d(in_channels=self.n_channels[2],
+                                out_channels=self.n_channels[3],
+                                kernel_size=self.kernel_sizes[3])
+        self.conv4_bn = nn.BatchNorm1d(self.n_channels[3])
+
+        self.pool = nn.AvgPool1d(self.pool_kernel_size)
 
         self.L_in = WINDOW
         for k in self.kernel_sizes:
@@ -105,17 +148,22 @@ class CNNEncoder(nn.Module):
 
         x = self.conv1(time_states)
         x = self.conv1_bn(x)
-        x = self.max_pool(x)
+        x = self.pool(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
         x = self.conv2_bn(x)
-        x = self.max_pool(x)
+        x = self.pool(x)
         x = F.leaky_relu(x)
 
         x = self.conv3(x)
         x = self.conv3_bn(x)
-        x = self.max_pool(x)
+        x = self.pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv4(x)
+        x = self.conv4_bn(x)
+        x = self.pool(x)
         x = F.leaky_relu(x)
 
         x = x.squeeze().view(-1, self.L_in * self.n_channels[-1])
@@ -321,28 +369,28 @@ class ProbabilisticProposer(nn.Module):
     def __init__(self):
         super(ProbabilisticProposer, self).__init__()
         self.d_out = 2
-        self.d_mixture = 8
+        self.d_mixture = 4
 
-        self.n_layers = 4
+        self.n_layers = 2
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
-        self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
-        self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
         self.layer_mu = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
         self.layer_sigma = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
         self.layer_w = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
 
     def forward(self, market_encoding, return_params=False):
+        pdf = market_encoding.view(-1, D_MODEL)
         for i in range(self.n_layers):
-            if i == 0:
-                res = market_encoding.view(-1, D_MODEL)
-                pdf = self.layers[i](market_encoding.view(-1, D_MODEL))
-            else:
+            if i % 2 == 0:
                 res = pdf
                 pdf = self.layers[i](pdf)
-            # pdf = layer_norm(pdf, 1 + self.gains[i], self.biases[i])
-            pdf = self.bns[i](pdf) + res
-            pdf = F.leaky_relu(pdf)
+                pdf = self.bns[i](pdf)
+                pdf = F.leaky_relu(pdf)
+            else:
+                pdf = self.layers[i](pdf)
+                pdf = self.bns[i](pdf) + res
+                pdf = F.leaky_relu(pdf)
+
         mu = self.layer_mu(pdf).view(-1, self.d_out, self.d_mixture)
         sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)) + 1e-5
         w = torch.softmax(self.layer_w(pdf).view(-1, self.d_out, self.d_mixture), dim=2)
@@ -397,70 +445,70 @@ class ActorCritic(nn.Module):
 
         self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
         self.combined_initial_bn = nn.BatchNorm1d(D_MODEL)
-        self.combined_initial_gain = nn.Parameter(torch.zeros(D_MODEL))
-        self.combined_initial_bias = nn.Parameter(torch.zeros(D_MODEL))
-        self.n_combined_layers = 4
+        self.n_combined_layers = 2
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_combined_layers)])
-        self.combined_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
-        self.combined_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_combined_layers)])
 
-        self.n_actor_layers = 4
+        self.n_actor_layers = 2
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_actor_layers)])
-        self.actor_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_actor_layers)])
-        self.actor_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, 3)
         self.actor_softmax = nn.Softmax(dim=1)
 
-        self.n_critic_layers = 4
+        self.n_critic_layers = 2
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
         self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_critic_layers)])
-        self.critic_gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_critic_layers)])
-        self.critic_biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
 
     def forward(self, market_encoding, proposed_actions, temp=1):
 
         x = torch.cat([
                     market_encoding.view(-1, D_MODEL),
-                    (proposed_actions + 1e-9).log().view(-1, self.d_action)
+                    proposed_actions.view(-1, self.d_action) * 10
                     ], 1)
         x = self.combined_initial(x)
-        x = self.combined_initial_bn(x) + market_encoding.view(-1, D_MODEL)
-        # x = layer_norm(x, 1 + self.combined_initial_gain, self.combined_initial_bias)
+        x = self.combined_initial_bn(x)
         x = F.leaky_relu(x)
         for i in range(self.n_combined_layers):
-            res = x
-            x = self.combined_layers[i](x)
-            x = self.combined_bns[i](x) + res
-            # x = layer_norm(x, 1 + self.combined_gains[i], self.combined_biases[i])
-            x = F.leaky_relu(x)
-
-        for i in range(self.n_actor_layers):
-            if i == 0:
-                res = x
-                policy = self.actor_layers[i](x)
+            if i % 2 == 0:
+                if i == 0:
+                    res = market_encoding.view(-1, D_MODEL)
+                else:
+                    res = x
+                x = self.combined_layers[i](x)
+                x = self.combined_bns[i](x)
+                x = F.leaky_relu(x)
             else:
+                x = self.combined_layers[i](x)
+                x = self.combined_bns[i](x) + res
+                x = F.leaky_relu(x)
+
+        policy = x
+        for i in range(self.n_actor_layers):
+            if i % 2 == 0:
                 res = policy
                 policy = self.actor_layers[i](policy)
-            # policy = layer_norm(policy, 1 + self.actor_gains[i], self.actor_biases[i])
-            policy = self.actor_bns[i](policy) + res
-            policy = F.leaky_relu(policy)
+                policy = self.actor_bns[i](policy)
+                policy = F.leaky_relu(policy)
+            else:
+                policy = self.actor_layers[i](policy)
+                policy = self.actor_bns[i](policy) + res
+                policy = F.leaky_relu(policy)
 
         policy = self.actor_out(policy) / temp
         policy = self.actor_softmax(policy)
 
+        critic = x
         for i in range(self.n_critic_layers):
-            if i == 0:
-                res = x
-                critic = self.critic_layers[i](x)
-            else:
+            if i % 2 == 0:
                 res = critic
                 critic = self.critic_layers[i](critic)
-            # critic = layer_norm(critic, 1 + self.critic_gains[i], self.critic_biases[i])
-            critic = self.critic_bns[i](critic) + res
-            critic = F.leaky_relu(critic)
+                critic = self.critic_bns[i](critic)
+                critic = F.leaky_relu(critic)
+            else:
+                critic = self.critic_layers[i](critic)
+                critic = self.critic_bns[i](critic) + res
+                critic = F.leaky_relu(critic)
 
         critic = self.critic_out(critic)
 
@@ -471,44 +519,39 @@ class EncoderToOthers(nn.Module):
 
     def __init__(self):
         super(EncoderToOthers, self).__init__()
-        self.initial_layer = nn.Linear(D_MODEL + 3, D_MODEL)
+        self.initial_layer = nn.Linear(D_MODEL + 2, D_MODEL)
         self.initial_bn = nn.BatchNorm1d(D_MODEL)
-        self.initial_gain = nn.Parameter(torch.zeros(D_MODEL))
-        self.initial_bias = nn.Parameter(torch.zeros(D_MODEL))
 
-        self.n_layers = 4
+        self.n_layers = 2
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
-        self.gains = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
-        self.biases = nn.ParameterList([torch.nn.Parameter(torch.zeros(D_MODEL)) for _ in range(self.n_layers)])
 
-    def forward(self, encoding, std, spread, percent_in):
+    def forward(self, encoding, spread, percent_in):
         x = torch.cat([
                     encoding.view(-1, D_MODEL),
-                    std.view(-1, 1),
-                    spread.view(-1, 1),
-                    percent_in.view(-1, 1)
+                    spread.view(-1, 1) * 100,
+                    percent_in.view(-1, 1) * 10
                     ], 1)
 
         x = self.initial_layer(x)
-        x = self.initial_bn(x) + encoding.view(-1, D_MODEL)
+        x = self.initial_bn(x)
         x = F.leaky_relu(x)
-        # x = layer_norm(x, 1 + self.initial_gain, self.initial_bias)
         for i in range(self.n_layers):
-            res = x
-            x = self.layers[i](x)
-            # x = layer_norm(x, 1 + self.gains[i], self.biases[i])
-            x = self.bns[i](x) + res
-            x = F.leaky_relu(x)
+            if i % 2 == 0:
+                if i == 0:
+                    res = encoding.view(-1, D_MODEL)
+                else:
+                    res = x
+                x = self.layers[i](x)
+                x = self.bns[i](x)
+                x = F.leaky_relu(x)
+            else:
+                x = self.layers[i](x)
+                x = self.bns[i](x) + res
+                x = F.leaky_relu(x)
 
         return x
 
-def layer_norm(layer, gain, bias):
-    mean = layer.mean(dim=1).view(-1, 1)
-    std = layer.mean(dim=1).view(-1, 1)
-    layer = (layer - mean) / std
-    layer = gain * layer + bias
-    return layer
 
 # class OrderNetwork(nn.Module):
 #     """

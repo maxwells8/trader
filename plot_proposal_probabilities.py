@@ -8,15 +8,19 @@ from zeus.zeus import Zeus
 MEN = networks.CNNEncoder().cpu()
 ETO = networks.EncoderToOthers().cpu()
 PN = networks.ProbabilisticProposer().cpu()
+ACN = networks.ActorCritic().cpu()
 MEN.load_state_dict(torch.load('./models/market_encoder.pt'))
 ETO.load_state_dict(torch.load('./models/encoder_to_others.pt'))
 PN.load_state_dict(torch.load('./models/proposer.pt'))
+ACN.load_state_dict(torch.load('./models/actor_critic.pt'))
 MEN = MEN.cpu()
 ETO = ETO.cpu()
 PN = PN.cpu()
+ACN = ACN.cpu()
 MEN.eval()
 ETO.eval()
 PN.eval()
+ACN.eval()
 
 # instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
 # start = np.random.randint(1136073600, 1546300800)
@@ -44,8 +48,14 @@ def add_bar(bar):
         spread_normalized = bar.spread / std
 
         market_encoding = MEN.forward(input_time_states)
-        market_encoding = ETO.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
+        for x in np.arange(-1, 1, 0.01):
+            market_encoding_ = ETO.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([x]))
+            # proposed, p_actions, w, mu, sigma = PN.forward(market_encoding, True)
+            proposed = torch.Tensor([[0.5, 0.5]])
+            print(round(x, 2), ACN.forward(market_encoding_, proposed))
+        market_encoding = ETO.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
         proposed, p_actions, w, mu, sigma = PN.forward(market_encoding, True)
+
         print("proposed:", proposed)
         print("probabilities:", p_actions)
         print()
@@ -54,5 +64,4 @@ def add_bar(bar):
         plt.plot(x, y)
         plt.show()
 
-
-zeus.stream_range(start, start + 60 * (networks.WINDOW + 1000), add_bar)
+zeus.stream_range(start, start + 60 * (networks.WINDOW + 10000), add_bar)

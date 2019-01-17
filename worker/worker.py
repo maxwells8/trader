@@ -25,8 +25,6 @@ class Worker(object):
     def __init__(self, name, instrument, granularity, models_loc, start, test=False):
 
         while True:
-            # putting this while loop here because sometime the optimizer
-            # is writing to the files and causes an exception
             self.market_encoder = CNNEncoder().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             self.proposer = ProbabilisticProposer().cpu()
@@ -42,8 +40,9 @@ class Worker(object):
                 self.proposer = self.proposer.cpu()
                 self.actor_critic = self.actor_critic.cpu()
                 break
-            except Exception as e:
-                print(e)
+            except Exception:
+                print("Failed to load models")
+                time.sleep(0.1)
 
         self.name = name
         self.models_loc = models_loc
@@ -74,6 +73,8 @@ class Worker(object):
 
         self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
 
+        self.tradeable_percentage = 0.1
+
         self.test = test
         if self.test:
             self.steps_before_trajectory = 500
@@ -85,9 +86,6 @@ class Worker(object):
 
         self.prev_value = self.zeus.unrealized_balance()
         self.prev_queried = None
-        self.prev_w = None
-        self.prev_mu = None
-        self.prev_sigma = None
 
     def add_bar(self, bar):
         time_state = [[[bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]]]
@@ -98,7 +96,11 @@ class Worker(object):
             return
 
         if len(self.time_states) >= self.window:
-            percent_in = self.zeus.position_size() / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
+            percent_in = (self.zeus.position_size() / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)) / self.tradeable_percentage
+
+            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
+            reward = (self.zeus.unrealized_balance() - self.prev_value) / (2000 * self.tradeable_percentage)
+            self.prev_value = self.zeus.unrealized_balance()
 
             input_time_states = torch.Tensor(self.time_states[-self.window:]).view(self.window, 1, networks.D_BAR).cpu()
             mean = input_time_states[:, 0, :4].mean()
@@ -108,17 +110,15 @@ class Worker(object):
             spread_normalized = bar.spread / std
 
             market_encoding = self.market_encoder.forward(input_time_states)
-            market_encoding = self.encoder_to_others.forward(market_encoding, (std + 1e-9).log(), torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
+            market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
+
             if np.random.rand() < self.p_new_proposal or len(self.time_states) == self.window:
-                queried_actions, p_actions, p_a_w, p_a_mu, p_a_sigma = self.proposer.forward(market_encoding, True)
+                queried_actions, p_actions = self.proposer.forward(market_encoding)
                 self.prev_queried = queried_actions
-                self.prev_w = p_a_w
-                self.prev_mu = p_a_mu
-                self.prev_sigma = p_a_sigma
             else:
                 queried_actions = self.prev_queried
-                p_actions = self.proposer.p(queried_actions, self.prev_w, self.prev_mu, self.prev_sigma)
-
+                _, _, p_w, p_mu, p_sigma = self.proposer.forward(market_encoding, True)
+                p_actions = self.proposer.p(queried_actions, p_w, p_mu, p_sigma)
             p_actions = p_actions.prod(1).view(-1, 1)
 
             if self.test:
@@ -138,6 +138,7 @@ class Worker(object):
                 #     action = torch.argmax(policy).item()
                 # else:
                 #     action = 2
+
                 action = torch.argmax(policy).item()
                 # action = torch.multinomial(policy, 1).item()
                 # action = np.random.randint(0, 2)
@@ -146,11 +147,6 @@ class Worker(object):
                 policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
                 action = torch.multinomial(policy, 1).item()
 
-
-            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
-            reward = (self.zeus.unrealized_balance() - self.prev_value) / 2000
-            self.prev_value = self.zeus.unrealized_balance()
-            # print(action, reward)
             mu = policy[0, action].item()
             action_mu = p_actions.item() + 1e-9
 
@@ -158,7 +154,7 @@ class Worker(object):
                 if self.zeus.position_size() < 0:
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
-                desired_percent_in = queried_actions[0, 0].item()
+                desired_percent_in = queried_actions[0, 0].item() * self.tradeable_percentage
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
@@ -172,7 +168,7 @@ class Worker(object):
                 if self.zeus.position_size() > 0:
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
-                desired_percent_in = queried_actions[0, 1].item()
+                desired_percent_in = queried_actions[0, 1].item() * self.tradeable_percentage
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
@@ -181,6 +177,12 @@ class Worker(object):
                 else:
                     amount = int(diff_percent * (abs(self.zeus.position_size()) + self.zeus.units_available()))
                     self.zeus.place_trade(amount, "Short")
+
+            # else:
+            #     amount = int(abs(self.zeus.position_size()))
+            #     self.zeus.close_units(amount)
+            #     pass
+
 
             if self.test:
                 # time.sleep(0.1)
@@ -246,7 +248,7 @@ class Worker(object):
                 del self.proposed_mus[0]
                 del self.proposed_actions[0]
 
-            if self.steps_since_push >= self.trajectory_steps / 4 and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
+            if (self.steps_since_push >= 5) and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 self.time_states,
                 self.percents_in,
@@ -285,7 +287,7 @@ class Worker(object):
             n_seconds = self.n_steps_left * 60
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
-        print("time: {time}, total rewards: {reward}, actor temp: {actor_temp}, steps: {steps}".format(time=time.time()-t0, reward=self.total_actual_reward, actor_temp=round(self.actor_temp, 5), steps=self.steps_before_trajectory))
+        print("time: {time}, total rewards: {reward}, actor temp: {actor_temp}, steps: {steps}".format(time=round(time.time()-t0, 2), reward=round(self.total_actual_reward, 2), actor_temp=round(self.actor_temp, 5), steps=self.steps_before_trajectory))
         if self.test:
             reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
             reward_ema = self.server.get("test_reward_ema")

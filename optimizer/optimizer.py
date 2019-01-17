@@ -90,9 +90,9 @@ class Optimizer(object):
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
-            self.start_step = 0
+            self.start_step = 1
             self.start_n_samples = 0
-            self.actor_temp = 5
+            self.actor_temp = 1
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
@@ -101,7 +101,7 @@ class Optimizer(object):
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
 
-        self.original_actor_temp = 5
+        self.original_actor_temp = 1
         self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
@@ -125,7 +125,7 @@ class Optimizer(object):
                     experience = msgpack.unpackb(experience, raw=False)
                     self.queued_experience.append(experience)
                     n_experiences += 1
-                elif (step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) + len(self.prioritized_experience) > 0:
+                elif (step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) + len(self.prioritized_experience) > 1:
                     break
                 else:
                     experience = self.server.blpop("experience")[1]
@@ -135,6 +135,14 @@ class Optimizer(object):
 
             experiences = self.queued_experience + self.prioritized_experience
             batch_size = len(experiences)
+
+            # if step == 25000 or step == 250000 or step == 2500000:
+            #     for param_group in self.optimizer.param_groups:
+            #         param_group['lr'] = param_group['lr'] / 10
+
+            if step == 10000 or step == 100000 or step == 1000000:
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = param_group['lr'] / 10
 
             # start grads anew
             self.optimizer.zero_grad()
@@ -173,27 +181,23 @@ class Optimizer(object):
             time_states_ = time_states_.transpose(0, 1)
 
             market_encoding = self.MEN.forward(time_states_)
-            market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-1]).cuda())
+            market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[-1]).cuda())
             queried = torch.Tensor(proposed_actions[-1]).cuda().view(batch_size, -1)
             policy, value = self.ACN.forward(market_encoding, queried)
 
-            v_next = value
-            v_trace = value
-            c = 1
-            t_men = 0
-            t_eto = 0
-            t_pn = 0
-            t_acn = 0
+            v_next = value.detach()
+            v_trace = value.detach()
             for i in range(1, self.trajectory_steps):
+
                 time_states_ = torch.cat(time_states[-window-i:-i], dim=1).cuda()
                 mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
                 std = time_states_[:, :, :4].contiguous().view(batch_size, -1).std(1).view(batch_size, 1, 1)
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
-                spread_ = torch.Tensor(spread[-i]).view(-1, 1, 1).cuda() / std
+                spread_ = torch.Tensor(spread[-i-1]).view(-1, 1, 1).cuda() / std
                 time_states_ = time_states_.transpose(0, 1)
 
                 market_encoding = self.MEN.forward(time_states_)
-                market_encoding = self.ETO.forward(market_encoding, (std + 1e-9).log(), spread_, torch.Tensor(percent_in[-i-1]).cuda())
+                market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[-i-1]).cuda())
                 queried = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
                 proposed, proposed_pi, p_x_w, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
                 queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
@@ -204,54 +208,26 @@ class Optimizer(object):
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
                 queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
 
-                # reward is indexed at -i instead of -i-1 since the reward is delayed by one
-                r = torch.Tensor(reward[-i]).cuda().view(-1, 1)
+                r = torch.Tensor(reward[-i-1]).cuda().view(-1, 1)
 
                 if i == self.trajectory_steps - 1:
-                    advantage_v = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9))) * (r + self.gamma * v_trace - value)
+                    rho = torch.min(self.max_rho, (pi_/(mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9)))
+                    advantage_v = rho * (r + self.gamma * v_trace - value)
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
-
-                    # _, target_value = self.ACN_.forward(market_encoding, queried)
-                    # proposed_v_loss += (-target_value).mean()
                     proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (policy * torch.log(policy + 1e-9)).mean()
                     proposed_entropy_loss += (proposed_pi * torch.log(proposed_pi + 1e-9)).mean()
                     # proposed_entropy_loss += (proposed * torch.log(proposed + 1e-9)).mean() # not exactly entropy, but ehh
 
-                delta_v = torch.min(self.max_rho, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9))) * (r + self.gamma * v_next - value)
-                c *= torch.min(self.max_c, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9)))
+                rho = torch.min(self.max_rho, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9)))
+                delta_v = rho * (r + self.gamma * v_next - value)
+                c = torch.min(self.max_c, (pi_ / (mu_ + 1e-9)) * (queried_pi_combined / (queried_mu + 1e-9)))
 
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
 
                 if i == self.trajectory_steps - 1:
                     critic_loss += nn.MSELoss()(value, v_trace.detach())
-
-                try:
-                    assert torch.isnan(queried_pi).sum() == 0
-                except AssertionError:
-                    for i in range(len(queried_pi[0])):
-                        if torch.isnan(queried_pi[0, i]).sum() > 0:
-                            print("p_x_w:", p_x_w[0, i])
-                            print("p_x_mu:", p_x_mu[0, i])
-                            print("p_x_sigma:", p_x_sigma[0, i])
-                            print("queried:", queried[0, i])
-                            print("queried_pi:", queried_pi[0, i])
-                            print("queried_mu:", queried_mu[0, i])
-                    raise AssertionError("queried_pi > 0")
-                try:
-                    assert torch.isnan(v_trace).sum() == 0
-                except AssertionError:
-                    for i in range(len(v_trace[0])):
-                        if torch.isnan(v_trace[0, i]).sum() > 0:
-                            print("value:", value[0, i])
-                            print("v_trace:", v_trace[0, i])
-                            print("delta_v:", delta_v[0, i])
-                            print("queried_pi:", queried_pi[0, i])
-                            print("queried_mu:", queried_mu[0, i])
-                            print("pi:", pi_[0, i])
-                            print("mu:", mu_[0, i])
-                    raise AssertionError("v_trace is nan")
 
                 v_next = value.detach()
 
@@ -274,21 +250,6 @@ class Optimizer(object):
 
             total_loss.backward()
             self.optimizer.step()
-
-            for param in self.MEN.named_parameters():
-                try:
-                    assert torch.isnan(param[1]).sum() == 0
-                except AssertionError:
-                    print("param:", param)
-                    print("value:", value)
-                    print("v_trace:", v_trace)
-                    print("delta_v:", delta_v)
-                    print("queried_pi:", queried_pi)
-                    print("queried_mu:", queried_mu)
-                    print("pi:", pi_)
-                    print("mu:", mu_)
-                    print("grad:", param[1].grad)
-                    raise AssertionError("param is nan")
 
             step += 1
             n_samples += len(self.queued_experience)
