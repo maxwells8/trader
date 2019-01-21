@@ -5,7 +5,7 @@ import math
 import matplotlib.pyplot as plt
 from zeus.zeus import Zeus
 
-MEN = networks.CNNEncoder().cpu()
+MEN = networks.LSTMCNNEncoder().cpu()
 ETO = networks.EncoderToOthers().cpu()
 PN = networks.ProbabilisticProposer().cpu()
 ACN = networks.ActorCritic().cpu()
@@ -22,15 +22,18 @@ ETO.eval()
 PN.eval()
 ACN.eval()
 
-# instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
-# start = np.random.randint(1136073600, 1546300800)
-instrument = "EUR_USD"
-start = np.random.randint(1546214400, 1546819200)
+instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+start = np.random.randint(1136073600, 1546300800)
+# instrument = "EUR_USD"
+# start = np.random.randint(1546214400, 1546819200)
 
 zeus = Zeus(instrument, "M1")
 
 time_states = []
+steps_since_last = 0
 def add_bar(bar):
+    global steps_since_last
+    steps_since_last += 1
     time_state = [[[bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]]]
 
     if len(time_states) == 0 or time_state != time_states[-1]:
@@ -38,7 +41,7 @@ def add_bar(bar):
     else:
         return
 
-    if len(time_states) >= networks.WINDOW:
+    if len(time_states) >= networks.WINDOW and steps_since_last >= networks.WINDOW:
         percent_in = zeus.position_size() / (abs(zeus.position_size()) + zeus.units_available() + 1e-9)
 
         input_time_states = torch.Tensor(time_states[-networks.WINDOW:]).view(networks.WINDOW, 1, networks.D_BAR).cpu()
@@ -48,11 +51,11 @@ def add_bar(bar):
         spread_normalized = bar.spread / std
 
         market_encoding = MEN.forward(input_time_states)
-        for x in np.arange(-1, 1, 0.01):
-            market_encoding_ = ETO.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([x]))
-            # proposed, p_actions, w, mu, sigma = PN.forward(market_encoding, True)
-            proposed = torch.Tensor([[0.5, 0.5]])
-            print(round(x, 2), ACN.forward(market_encoding_, proposed))
+        # for x in np.arange(-1, 1, 0.01):
+        #     market_encoding_ = ETO.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([x]))
+        #     # proposed, p_actions, w, mu, sigma = PN.forward(market_encoding, True)
+        #     proposed = torch.Tensor([[0.5, 0.5]])
+        #     print(round(x, 2), ACN.forward(market_encoding_, proposed))
         market_encoding = ETO.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
         proposed, p_actions, w, mu, sigma = PN.forward(market_encoding, True)
 
@@ -64,4 +67,10 @@ def add_bar(bar):
         plt.plot(x, y)
         plt.show()
 
-zeus.stream_range(start, start + 60 * (networks.WINDOW + 10000), add_bar)
+        steps_since_last = 0
+
+n = 10000
+while n > 0:
+    n_ = min(500, n)
+    zeus.stream_range(start, start + 60 * n_, add_bar)
+    n -= n_

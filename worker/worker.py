@@ -25,7 +25,7 @@ class Worker(object):
     def __init__(self, name, instrument, granularity, models_loc, start, test=False):
 
         while True:
-            self.market_encoder = CNNEncoder().cpu()
+            self.market_encoder = LSTMCNNEncoder().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             self.proposer = ProbabilisticProposer().cpu()
             self.actor_critic = ActorCritic().cpu()
@@ -68,21 +68,22 @@ class Worker(object):
         self.start = start
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
-        base_temp = float(self.server.get("actor_temp").decode("utf-8"))
-        self.actor_temp = np.random.exponential(base_temp / np.log(2))
-
         self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
 
         self.tradeable_percentage = 0.1
 
         self.test = test
         if self.test:
-            self.steps_before_trajectory = 500
+            self.steps_before_trajectory = 1440 - self.trajectory_steps
+            self.actor_temp = 1
         else:
             self.steps_before_trajectory = 500
+            base_temp = float(self.server.get("actor_temp").decode("utf-8"))
+            self.actor_temp = np.random.exponential(base_temp / np.log(2))
         self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
         self.i_step = 0
         self.steps_since_push = 0
+        self.steps_between_experiences = 2
 
         self.prev_value = self.zeus.unrealized_balance()
         self.prev_queried = None
@@ -114,37 +115,20 @@ class Worker(object):
 
             if np.random.rand() < self.p_new_proposal or len(self.time_states) == self.window:
                 queried_actions, p_actions = self.proposer.forward(market_encoding)
-                self.prev_queried = queried_actions
+                self.prev_queried = queried_actions.detach()
             else:
                 queried_actions = self.prev_queried
                 _, _, p_w, p_mu, p_sigma = self.proposer.forward(market_encoding, True)
                 p_actions = self.proposer.p(queried_actions, p_w, p_mu, p_sigma)
             p_actions = p_actions.prod(1).view(-1, 1)
 
+            policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
+
             if self.test:
-                # if queried_actions[0, 0].item() > 0.5:
-                #     queried_actions[0, 0] = 1
-                # else:
-                #     queried_actions[0, 0] = 0
-                #
-                #     if queried_actions[0, 1].item() > 0.5:
-                #         queried_actions[0, 1] = 1
-                #     else:
-                #         queried_actions[0, 1] = 0
-
-                policy, value = self.actor_critic.forward(market_encoding, queried_actions, 1)
-
-                # if torch.max(policy) > 0.75:
-                #     action = torch.argmax(policy).item()
-                # else:
-                #     action = 2
-
                 action = torch.argmax(policy).item()
                 # action = torch.multinomial(policy, 1).item()
                 # action = np.random.randint(0, 2)
-
             else:
-                policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
                 action = torch.multinomial(policy, 1).item()
 
             mu = policy[0, action].item()
@@ -248,7 +232,7 @@ class Worker(object):
                 del self.proposed_mus[0]
                 del self.proposed_actions[0]
 
-            if (self.steps_since_push >= 5) and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
+            if (self.steps_since_push >= self.steps_between_experiences) and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 self.time_states,
                 self.percents_in,
@@ -284,7 +268,7 @@ class Worker(object):
 
         t0 = time.time()
         while self.n_steps_left > 0:
-            n_seconds = self.n_steps_left * 60
+            n_seconds = min(self.n_steps_left, 500) * 60
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
         print("time: {time}, total rewards: {reward}, actor temp: {actor_temp}, steps: {steps}".format(time=round(time.time()-t0, 2), reward=round(self.total_actual_reward, 2), actor_temp=round(self.actor_temp, 5), steps=self.steps_before_trajectory))

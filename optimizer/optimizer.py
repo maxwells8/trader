@@ -27,7 +27,7 @@ class Optimizer(object):
         # this is the lstm's version
         # self.MEN = MarketEncoder().cuda()
         # this is the attention version
-        self.MEN = CNNEncoder().cuda()
+        self.MEN = LSTMCNNEncoder().cuda()
         self.ETO = EncoderToOthers().cuda()
         self.PN = ProbabilisticProposer().cuda()
         self.ACN = ActorCritic().cuda()
@@ -37,7 +37,7 @@ class Optimizer(object):
             self.PN.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
         except FileNotFoundError:
-            self.MEN = CNNEncoder().cuda()
+            self.MEN = LSTMCNNEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.PN = ProbabilisticProposer().cuda()
             self.ACN = ActorCritic().cuda()
@@ -125,7 +125,7 @@ class Optimizer(object):
                     experience = msgpack.unpackb(experience, raw=False)
                     self.queued_experience.append(experience)
                     n_experiences += 1
-                elif (step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) + len(self.prioritized_experience) > 1:
+                elif (step != 1 or (step == 1 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) > 1:
                     break
                 else:
                     experience = self.server.blpop("experience")[1]
@@ -140,9 +140,9 @@ class Optimizer(object):
             #     for param_group in self.optimizer.param_groups:
             #         param_group['lr'] = param_group['lr'] / 10
 
-            if step == 10000 or step == 100000 or step == 1000000:
+            if step in [10000, 25000, 100000, 250000]:
                 for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = param_group['lr'] / 10
+                    param_group['lr'] = param_group['lr'] / 2
 
             # start grads anew
             self.optimizer.zero_grad()

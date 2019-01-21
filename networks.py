@@ -8,13 +8,15 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 512
-N_LSTM_LAYERS = 1
+D_MODEL = 64
 WINDOW = 360
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 class CNNRelationalEncoder(nn.Module):
+    """
+    not finished
+    """
     def __init__(self):
         super(CNNRelationalEncoder, self).__init__()
 
@@ -59,6 +61,9 @@ class CNNRelationalEncoder(nn.Module):
 
 
 class CNNResEncoder(nn.Module):
+    """
+    not finished
+    """
     def __init__(self):
         super(CNNResEncoder, self).__init__()
 
@@ -175,6 +180,114 @@ class CNNEncoder(nn.Module):
 
         return x
 
+
+class LSTMCNNEncoder(nn.Module):
+    def __init__(self):
+        super(LSTMCNNEncoder, self).__init__()
+
+        self.n_lstm_layers = 2
+        self.lstm_in_dim = int(D_MODEL / 8)
+        self.lstm_hidden_dim = int(D_MODEL / 4)
+        self.n_init_channels = int(D_MODEL / 16)
+        self.n_channels = [int(D_MODEL / 8), int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3, 3, 3]
+        self.pool_kernel_size = 2
+
+        self.bar_to_lstm = nn.Sequential(
+                                nn.Linear(D_BAR, self.lstm_in_dim),
+                                nn.LeakyReLU(),
+                                nn.Linear(self.lstm_in_dim, self.lstm_in_dim)
+                            )
+
+        self.lstm = nn.LSTM(input_size=self.lstm_in_dim,
+                            hidden_size=self.lstm_hidden_dim,
+                            num_layers=self.n_lstm_layers,
+                            batch_first=True)
+
+        self.lstm_to_conv = nn.Sequential(
+                                nn.Linear(self.lstm_hidden_dim, self.lstm_hidden_dim),
+                                nn.LeakyReLU(),
+                                nn.Linear(self.lstm_hidden_dim, self.n_init_channels)
+                            )
+
+        self.conv1 = nn.Conv1d(in_channels=self.n_init_channels,
+                                out_channels=self.n_channels[0],
+                                kernel_size=self.kernel_sizes[0])
+        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0])
+
+        self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
+                                out_channels=self.n_channels[1],
+                                kernel_size=self.kernel_sizes[1])
+        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1])
+
+        self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
+                                out_channels=self.n_channels[2],
+                                kernel_size=self.kernel_sizes[2])
+        self.conv3_bn = nn.BatchNorm1d(self.n_channels[2])
+
+        self.conv4 = nn.Conv1d(in_channels=self.n_channels[2],
+                                out_channels=self.n_channels[3],
+                                kernel_size=self.kernel_sizes[3])
+        self.conv4_bn = nn.BatchNorm1d(self.n_channels[3])
+
+        self.pool = nn.AvgPool1d(self.pool_kernel_size)
+
+        self.L_in = WINDOW
+        for k in self.kernel_sizes:
+            self.L_in = math.floor(self.L_in - k + 1)
+            self.L_in = math.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
+        self.L_in = int(self.L_in)
+
+        self.n_fc_layers = 1
+        begin_dim = self.L_in * self.n_channels[-1]
+        end_dim = D_MODEL
+        # scale down the layer size linearly from begin_dim to end_dim
+        self.fc_layers = nn.ModuleList([nn.Linear(int((end_dim - begin_dim) * n / self.n_fc_layers + begin_dim), int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
+        self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
+
+    def forward(self, market_values):
+        time_states = []
+        for time_state in market_values:
+            time_states.append(time_state.view(-1, 1, D_BAR))
+
+        # concatting such that the dim is (batch_size, WINDOW, D_BAR)
+        time_states = torch.cat(time_states, dim=1)
+
+        x = self.bar_to_lstm(time_states)
+        x, _ = self.lstm(x)
+        x = self.lstm_to_conv(x)
+        x = x.transpose(1, 2)
+
+        x = self.conv1(x)
+        x = self.conv1_bn(x)
+        x = self.pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv2(x)
+        x = self.conv2_bn(x)
+        x = self.pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv3(x)
+        x = self.conv3_bn(x)
+        x = self.pool(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv4(x)
+        x = self.conv4_bn(x)
+        x = self.pool(x)
+        x = F.leaky_relu(x)
+
+        x = x.squeeze().view(-1, self.L_in * self.n_channels[-1])
+
+        for i in range(self.n_fc_layers):
+            x = self.fc_layers[i](x)
+            x = self.fc_bn[i](x)
+            x = F.leaky_relu(x)
+
+        return x
+
+
 class MarketEncoder(nn.Module):
     """
     DEPRECATED
@@ -183,13 +296,15 @@ class MarketEncoder(nn.Module):
     def __init__(self, device='cuda'):
         super(MarketEncoder, self).__init__()
 
+        self.n_lstm_layers = 2
+
         self.fc1 = nn.Linear(D_BAR, D_MODEL)
-        self.lstm = nn.LSTM(input_size=D_MODEL, hidden_size=D_MODEL, num_layers=N_LSTM_LAYERS)
+        self.lstm = nn.LSTM(input_size=D_MODEL, hidden_size=D_MODEL, num_layers=self.n_lstm_layers)
         self.hidden = self.init_hidden(1, device)
 
     def init_hidden(self, batch_size, device):
-        return (torch.zeros(N_LSTM_LAYERS, batch_size, D_MODEL, device=device),
-                torch.zeros(N_LSTM_LAYERS, batch_size, D_MODEL, device=device))
+        return (torch.zeros(self.n_lstm_layers, batch_size, D_MODEL, device=device),
+                torch.zeros(self.n_lstm_layers, batch_size, D_MODEL, device=device))
 
     def forward(self, input_market_values, percent_in, spread, device, reset_lstm=True):
         x = None
@@ -464,7 +579,7 @@ class ActorCritic(nn.Module):
 
         x = torch.cat([
                     market_encoding.view(-1, D_MODEL),
-                    proposed_actions.view(-1, self.d_action) * 10
+                    proposed_actions.view(-1, self.d_action) * 100
                     ], 1)
         x = self.combined_initial(x)
         x = self.combined_initial_bn(x)
@@ -529,8 +644,8 @@ class EncoderToOthers(nn.Module):
     def forward(self, encoding, spread, percent_in):
         x = torch.cat([
                     encoding.view(-1, D_MODEL),
-                    spread.view(-1, 1) * 100,
-                    percent_in.view(-1, 1) * 10
+                    spread.view(-1, 1) * 1000,
+                    percent_in.view(-1, 1) * 100
                     ], 1)
 
         x = self.initial_layer(x)

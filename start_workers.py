@@ -32,6 +32,7 @@ if __name__ == "__main__":
         # start = np.random.randint(1136073600, 1546300800)
         instrument = "EUR_USD"
         start = np.random.randint(1546214400, 1546819200)
+        start = np.random.randint(1546819200, 1546948800)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start))
         process.start()
@@ -48,7 +49,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 60:
+            while process.is_alive() and time.time() - times[i] < 100:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
