@@ -8,8 +8,9 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 64
-WINDOW = 360
+D_MODEL = 128
+WINDOW = 240
+P_DROPOUT = 0.1
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -112,22 +113,22 @@ class CNNEncoder(nn.Module):
         self.conv1 = nn.Conv1d(in_channels=D_BAR,
                                 out_channels=self.n_channels[0],
                                 kernel_size=self.kernel_sizes[0])
-        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0])
+        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0], eps=1e-9)
 
         self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
                                 out_channels=self.n_channels[1],
                                 kernel_size=self.kernel_sizes[1])
-        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1])
+        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1], eps=1e-9)
 
         self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
                                 out_channels=self.n_channels[2],
                                 kernel_size=self.kernel_sizes[2])
-        self.conv3_bn = nn.BatchNorm1d(self.n_channels[2])
+        self.conv3_bn = nn.BatchNorm1d(self.n_channels[2], eps=1e-9)
 
         self.conv4 = nn.Conv1d(in_channels=self.n_channels[2],
                                 out_channels=self.n_channels[3],
                                 kernel_size=self.kernel_sizes[3])
-        self.conv4_bn = nn.BatchNorm1d(self.n_channels[3])
+        self.conv4_bn = nn.BatchNorm1d(self.n_channels[3], eps=1e-9)
 
         self.pool = nn.AvgPool1d(self.pool_kernel_size)
 
@@ -188,13 +189,14 @@ class LSTMCNNEncoder(nn.Module):
         self.n_lstm_layers = 2
         self.lstm_in_dim = int(D_MODEL / 8)
         self.lstm_hidden_dim = int(D_MODEL / 4)
-        self.n_init_channels = int(D_MODEL / 16)
-        self.n_channels = [int(D_MODEL / 8), int(D_MODEL / 4), int(D_MODEL / 2), D_MODEL]
-        self.kernel_sizes = [3, 3, 3, 3]
+        self.n_init_channels = int(D_MODEL / 4)
+        self.n_channels = [int(D_MODEL / 2), D_MODEL]
+        self.kernel_sizes = [3, 3]
         self.pool_kernel_size = 2
 
         self.bar_to_lstm = nn.Sequential(
                                 nn.Linear(D_BAR, self.lstm_in_dim),
+                                nn.Dropout(P_DROPOUT),
                                 nn.LeakyReLU(),
                                 nn.Linear(self.lstm_in_dim, self.lstm_in_dim)
                             )
@@ -202,33 +204,25 @@ class LSTMCNNEncoder(nn.Module):
         self.lstm = nn.LSTM(input_size=self.lstm_in_dim,
                             hidden_size=self.lstm_hidden_dim,
                             num_layers=self.n_lstm_layers,
-                            batch_first=True)
+                            batch_first=True,
+                            dropout=P_DROPOUT)
 
         self.lstm_to_conv = nn.Sequential(
                                 nn.Linear(self.lstm_hidden_dim, self.lstm_hidden_dim),
+                                nn.Dropout(P_DROPOUT),
                                 nn.LeakyReLU(),
-                                nn.Linear(self.lstm_hidden_dim, self.n_init_channels)
+                                nn.Linear(self.lstm_hidden_dim, self.n_init_channels - D_BAR)
                             )
 
         self.conv1 = nn.Conv1d(in_channels=self.n_init_channels,
                                 out_channels=self.n_channels[0],
                                 kernel_size=self.kernel_sizes[0])
-        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0])
+        self.conv1_bn = nn.BatchNorm1d(self.n_channels[0], eps=1e-9)
 
         self.conv2 = nn.Conv1d(in_channels=self.n_channels[0],
                                 out_channels=self.n_channels[1],
                                 kernel_size=self.kernel_sizes[1])
-        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1])
-
-        self.conv3 = nn.Conv1d(in_channels=self.n_channels[1],
-                                out_channels=self.n_channels[2],
-                                kernel_size=self.kernel_sizes[2])
-        self.conv3_bn = nn.BatchNorm1d(self.n_channels[2])
-
-        self.conv4 = nn.Conv1d(in_channels=self.n_channels[2],
-                                out_channels=self.n_channels[3],
-                                kernel_size=self.kernel_sizes[3])
-        self.conv4_bn = nn.BatchNorm1d(self.n_channels[3])
+        self.conv2_bn = nn.BatchNorm1d(self.n_channels[1], eps=1e-9)
 
         self.pool = nn.AvgPool1d(self.pool_kernel_size)
 
@@ -243,7 +237,7 @@ class LSTMCNNEncoder(nn.Module):
         end_dim = D_MODEL
         # scale down the layer size linearly from begin_dim to end_dim
         self.fc_layers = nn.ModuleList([nn.Linear(int((end_dim - begin_dim) * n / self.n_fc_layers + begin_dim), int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
-        self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
+        self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim), eps=1e-9) for n in range(self.n_fc_layers)])
 
     def forward(self, market_values):
         time_states = []
@@ -256,6 +250,7 @@ class LSTMCNNEncoder(nn.Module):
         x = self.bar_to_lstm(time_states)
         x, _ = self.lstm(x)
         x = self.lstm_to_conv(x)
+        x = torch.cat([x, time_states], dim=2)
         x = x.transpose(1, 2)
 
         x = self.conv1(x)
@@ -265,16 +260,6 @@ class LSTMCNNEncoder(nn.Module):
 
         x = self.conv2(x)
         x = self.conv2_bn(x)
-        x = self.pool(x)
-        x = F.leaky_relu(x)
-
-        x = self.conv3(x)
-        x = self.conv3_bn(x)
-        x = self.pool(x)
-        x = F.leaky_relu(x)
-
-        x = self.conv4(x)
-        x = self.conv4_bn(x)
         x = self.pool(x)
         x = F.leaky_relu(x)
 
@@ -486,31 +471,46 @@ class ProbabilisticProposer(nn.Module):
         self.d_out = 2
         self.d_mixture = 4
 
-        self.n_layers = 2
-        self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
-        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
+        self.dist_n_layers = 2
+        self.dist_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.dist_n_layers)])
+        self.dist_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.dist_n_layers)])
+        self.dropout = nn.Dropout(P_DROPOUT)
         self.layer_mu = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
         self.layer_sigma = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
         self.layer_w = nn.Linear(D_MODEL, self.d_out * self.d_mixture)
 
-    def forward(self, market_encoding, return_params=False):
+    def forward(self, market_encoding, return_params=False, temp=None):
+        if temp == None:
+            temp = {"w":1, "mu":1, "sigma":1}
+
         pdf = market_encoding.view(-1, D_MODEL)
-        for i in range(self.n_layers):
+        for i in range(self.dist_n_layers):
             if i % 2 == 0:
                 res = pdf
-                pdf = self.layers[i](pdf)
-                pdf = self.bns[i](pdf)
+                pdf = self.dropout(pdf)
+                pdf = self.dist_layers[i](pdf)
+                pdf = self.dist_bns[i](pdf)
+                pdf = self.dropout(pdf)
                 pdf = F.leaky_relu(pdf)
             else:
-                pdf = self.layers[i](pdf)
-                pdf = self.bns[i](pdf) + res
+                pdf = self.dist_layers[i](pdf)
+                pdf = self.dist_bns[i](pdf)
+                pdf = pdf + res
                 pdf = F.leaky_relu(pdf)
 
+        w = self.layer_w(pdf).view(-1, self.d_out, self.d_mixture)
+        w = w / temp["w"]
+        w = torch.softmax(w, dim=2)
+
         mu = self.layer_mu(pdf).view(-1, self.d_out, self.d_mixture)
-        sigma = torch.abs(self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)) + 1e-5
-        w = torch.softmax(self.layer_w(pdf).view(-1, self.d_out, self.d_mixture), dim=2)
+        mu = mu / temp["mu"]
+
+        sigma = self.layer_sigma(pdf).view(-1, self.d_out, self.d_mixture)
+        sigma = sigma / temp["sigma"]
+        sigma = torch.abs(sigma) + 1e-5
+
         x = self.sample(w, mu, sigma)
-        p_x = self.p(x, w, mu, sigma)
+        p_x = self.p(x.detach(), w, mu, sigma)
 
         if return_params:
             return x, p_x, w, mu, sigma
@@ -533,9 +533,7 @@ class ProbabilisticProposer(nn.Module):
     def inverse_cdf(self, p, mu, sigma):
         # sampling from a logit normal distribution
         x = torch.sigmoid(torch.erfinv(p * 2 - 1) * sigma * math.sqrt(2) + mu)
-        x = torch.min(torch.max(x,
-                                torch.zeros(1, device=x.device) + 1e-6),
-                      torch.ones(1, device=x.device) - 1e-6)
+        x = torch.clamp(x, 1e-6, 1 - 1e-6)
         return x
 
     def sample(self, w, mu, sigma):
@@ -544,6 +542,30 @@ class ProbabilisticProposer(nn.Module):
         samples = self.inverse_cdf(p, mu.gather(2, i), sigma.gather(2, i))
         sample = (w * samples).sum(2).view(-1, self.d_out)
         return sample
+
+
+class ProposerGate(nn.Module):
+
+    def __init__(self):
+        super(ProposerGate, self).__init__()
+        self.d_dist = 2
+
+        self.dropout = nn.Dropout(P_DROPOUT)
+        self.layer_init = nn.Linear(D_MODEL + 2 * self.d_dist, D_MODEL)
+        self.bn_init = nn.BatchNorm1d(D_MODEL)
+        self.layer_out = nn.Linear(D_MODEL, 1)
+
+    def forward(self, market_encoding, cur_amounts, proposed_amounts, temp=1):
+        p = torch.cat([market_encoding.view(-1, D_MODEL), cur_amounts.view(-1, self.d_dist), proposed_amounts.view(-1, self.d_dist)], dim=1)
+        p = self.layer_init(p)
+        p = self.dropout(p)
+        p = F.leaky_relu(p)
+        p = self.layer_out(p)
+        p = p / temp
+        p = torch.sigmoid(p)
+
+        new_amounts = torch.where(torch.rand_like(p) < p, proposed_amounts.view(-1, self.d_dist), cur_amounts.view(-1, self.d_dist))
+        return new_amounts, p
 
 
 class ActorCritic(nn.Module):
@@ -557,29 +579,30 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
 
         self.d_action = 2
+        self.dropout = nn.Dropout(P_DROPOUT)
 
         self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
-        self.combined_initial_bn = nn.BatchNorm1d(D_MODEL)
+        self.combined_initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
         self.n_combined_layers = 2
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
-        self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_combined_layers)])
+        self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_combined_layers)])
 
         self.n_actor_layers = 2
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
-        self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_actor_layers)])
+        self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, 3)
         self.actor_softmax = nn.Softmax(dim=1)
 
         self.n_critic_layers = 2
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
-        self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_critic_layers)])
+        self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
 
     def forward(self, market_encoding, proposed_actions, temp=1):
 
         x = torch.cat([
                     market_encoding.view(-1, D_MODEL),
-                    proposed_actions.view(-1, self.d_action) * 100
+                    proposed_actions.view(-1, self.d_action) * 10
                     ], 1)
         x = self.combined_initial(x)
         x = self.combined_initial_bn(x)
@@ -590,39 +613,48 @@ class ActorCritic(nn.Module):
                     res = market_encoding.view(-1, D_MODEL)
                 else:
                     res = x
+                x = self.dropout(x)
                 x = self.combined_layers[i](x)
                 x = self.combined_bns[i](x)
+                x = self.dropout(x)
                 x = F.leaky_relu(x)
             else:
                 x = self.combined_layers[i](x)
-                x = self.combined_bns[i](x) + res
+                x = self.combined_bns[i](x)
+                x = x + res
                 x = F.leaky_relu(x)
 
         policy = x
         for i in range(self.n_actor_layers):
             if i % 2 == 0:
                 res = policy
+                policy = self.dropout(policy)
                 policy = self.actor_layers[i](policy)
                 policy = self.actor_bns[i](policy)
+                policy = self.dropout(policy)
                 policy = F.leaky_relu(policy)
             else:
                 policy = self.actor_layers[i](policy)
-                policy = self.actor_bns[i](policy) + res
+                policy = self.actor_bns[i](policy)
+                policy = policy + res
                 policy = F.leaky_relu(policy)
 
-        policy = self.actor_out(policy) / temp
-        policy = self.actor_softmax(policy)
+        policy_ = self.actor_out(policy) / temp
+        policy = self.actor_softmax(policy_)
 
         critic = x
         for i in range(self.n_critic_layers):
             if i % 2 == 0:
                 res = critic
+                critic = self.dropout(critic)
                 critic = self.critic_layers[i](critic)
                 critic = self.critic_bns[i](critic)
+                critic = self.dropout(critic)
                 critic = F.leaky_relu(critic)
             else:
                 critic = self.critic_layers[i](critic)
-                critic = self.critic_bns[i](critic) + res
+                critic = self.critic_bns[i](critic)
+                critic = critic + res
                 critic = F.leaky_relu(critic)
 
         critic = self.critic_out(critic)
@@ -635,17 +667,18 @@ class EncoderToOthers(nn.Module):
     def __init__(self):
         super(EncoderToOthers, self).__init__()
         self.initial_layer = nn.Linear(D_MODEL + 2, D_MODEL)
-        self.initial_bn = nn.BatchNorm1d(D_MODEL)
+        self.initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
 
         self.n_layers = 2
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
-        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_layers)])
+        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_layers)])
+        self.dropout = nn.Dropout(P_DROPOUT)
 
     def forward(self, encoding, spread, percent_in):
         x = torch.cat([
                     encoding.view(-1, D_MODEL),
-                    spread.view(-1, 1) * 1000,
-                    percent_in.view(-1, 1) * 100
+                    spread.view(-1, 1) * 10,
+                    percent_in.view(-1, 1) * 10
                     ], 1)
 
         x = self.initial_layer(x)
@@ -657,171 +690,15 @@ class EncoderToOthers(nn.Module):
                     res = encoding.view(-1, D_MODEL)
                 else:
                     res = x
+                x = self.dropout(x)
                 x = self.layers[i](x)
                 x = self.bns[i](x)
+                x = self.dropout(x)
                 x = F.leaky_relu(x)
             else:
                 x = self.layers[i](x)
-                x = self.bns[i](x) + res
+                x = self.bns[i](x)
+                x = x + res
                 x = F.leaky_relu(x)
 
         return x
-
-
-# class OrderNetwork(nn.Module):
-#     """
-#     takes a market encoding and an open order, and outputs the advantage and value of keeping and closing the order
-#
-#     the order must give the open time information
-#     """
-#
-#     def __init__(self, d_model, d_order):
-#         super(OrderNetwork, self).__init__()
-#
-#         self.d_model = d_model
-#         self.d_order = d_order
-#
-#         self.order_fc1 = nn.Linear(self.d_order, self.d_model)
-#         self.order_fc2 = nn.Linear(self.d_model, self.d_model)
-#
-#         self.combine = nn.Linear(2*self.d_model, self.d_model)
-#
-#         self.advantage1 = nn.Linear(self.d_model, self.d_model)
-#         self.advantage2 = nn.Linear(self.d_model, 2)
-#
-#         self.value1 = nn.Linear(self.d_model, self.d_model)
-#         self.value2 = nn.Linear(self.d_model, 1)
-#
-#     def forward(self, market_encoding_tuples, orders):
-#         """
-#         market_encodings is a list of tuples: [(market_encoding0, n0), ..., (market_encodingk, nk)]
-#         """
-#         order_vec = F.leaky_relu(self.order_fc1(orders.view(-1, self.d_order)))
-#         order_vec = F.leaky_relu(order_vec) + order_vec
-#
-#         market_encoding = torch.Tensor([], device=str(order_vec.device))
-#         for METuple in market_encoding_tuples:
-#             next_ME = METuple[0].view(-1, self.d_model).repeat(METuple[1], 1)
-#             market_encoding = torch.cat([market_encoding, next_ME], 0)
-#         combined = F.leaky_relu(self.combine(torch.cat([market_encoding,
-#                                                        order_vec.view(-1, self.d_model)], 1)))
-#         # combined = F.leaky_relu(self.combine(torch.cat([market_encoding.repeat(orders.size()[0], 1).view(-1, self.d_model),
-#         #                                                order_vec.view(-1, self.d_model)], 1)))
-#
-#         advantage = F.leaky_relu(self.advantage1(combined)) + combined
-#         advantage = self.advantage2(advantage)
-#
-#         value = F.leaky_relu(self.value1(combined)) + combined
-#         value = self.value2(value)
-#
-#         return advantage, value
-
-"""
-AME = AttentionMarketEncoder().cuda()
-
-inputs = torch.cat([torch.randn([1, 2, D_BAR]) for _ in range(3)]).cuda()
-percent_in = torch.Tensor([[0.5], [0.75]]).cuda()
-spread = torch.Tensor([[1 / 10000], [2 / 10000]]).cuda()
-
-print(AME.forward(inputs, percent_in, spread).size())
-"""
-
-"""
-ME = MarketEncoder().cuda()
-P = Proposer().cuda()
-AC = ActorCritic().cuda()
-
-inputs = [torch.randn([1, 1, D_BAR]) for _ in range(512)]
-
-# n = 10
-# t0 = time.time()
-# for _ in range(n):
-market_encoding = ME.forward(torch.cat(inputs).cuda(), torch.Tensor([0.5]).cuda(), 'cuda')
-proposed_actions = P.forward(market_encoding)
-print(proposed_actions)
-proposed_actions = P.forward(market_encoding, 0.1)
-print(proposed_actions)
-policy, value = AC.forward(market_encoding, proposed_actions)
-(torch.log(policy)[0, 1]*value).backward()
-
-torch.save(ME, "models/market_encoder.pt")
-torch.save(P, "models/proposer.pt")
-torch.save(AC, "models/actor_critic.pt")
-# print((time.time() - t0) / n)
-"""
-"""
-ME = MarketEncoder(8, 256, 2)
-inputs = [torch.randn([1, 1, ME.input_dim]) for _ in range(400)]
-n = 10
-t0 = time.time()
-for _ in range(n):
-    out = ME.forward(inputs)
-print((time.time() - t0) / n)
-"""
-
-"""
-### like 30 minutes of work on a relation reasoning model that i gave up on
-
-class Bot(nn.Module):
-
-    def __init__(self, d_price, d_order, n_heads, d_model, n_blocks):
-        super(Bot, self).__init__()
-
-        self.d_price = d_price
-        self.d_order = d_order
-        self.n_heads = n_heads
-        self.d_model = d_model
-        self.n_blocks = n_blocks
-        self.d_k = self.d_model / self.n_heads
-        self.d_v = self.d_model / self.n_heads
-        self.Q = None
-        self.K = None
-        self.V = None
-
-        self.linear_price_transformation = nn.Linear(self.d_price, self.d_model)
-
-        self.relational_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.relational_mlp2 = nn.Linear(self.d_model, self.d_model)
-
-        self.shared_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.shared_mlp2 = nn.Linear(self.d_model, self.d_model)
-        self.shared_mlp3 = nn.Linear(self.d_model, self.d_model)
-        self.shared_mlp4 = nn.Linear(self.d_model, self.d_model)
-
-        # each order's value of keeping / closing
-        self.order_mlp1 = nn.Linear(self.d_order + self.d_model, self.d_model)
-        self.order_mlp2 = nn.Linear(self.d_model, self.d_model)
-        self.order_mlp3 = nn.Linear(self.d_model, self.d_model)
-        self.order_mlp4 = nn.Linear(self.d_model, self.d_model)
-
-        self.order_advantage_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.order_advantage_mlp2 = nn.Linear(self.d_model, 2)
-
-        self.order_value_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.order_value_mlp2 = nn.Linear(self.d_model, 1)
-
-        # placing an order actor critic
-        self.place_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.place_mlp2 = nn.Linear(self.d_model, self.d_model)
-        self.place_mlp3 = nn.Linear(self.d_model, self.d_model)
-        self.place_mlp4 = nn.Linear(self.d_model, self.d_model)
-
-        self.place_quantity_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.place_quantity_mlp2 = nn.Linear(self.d_model, self.d_model)
-        self.place_quantity_mlp3 = nn.Linear(self.d_model, self.d_model)
-        self.place_quantity_mlp4 = nn.Linear(self.d_model, 2)
-
-        self.place_critic_mlp1 = nn.Linear(2 + self.d_model, self.d_model)
-        self.place_critic_mlp2 = nn.Linear(self.d_model, self.d_model)
-        self.place_critic_mlp3 = nn.Linear(self.d_model, self.d_model)
-        self.place_critic_mlp4 = nn.Linear(self.d_model, self.d_model)
-
-        self.place_critic_advantage_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.place_critic_advantage_mlp2 = nn.Linear(self.d_model, 3)
-
-        self.place_critic_value_mlp1 = nn.Linear(self.d_model, self.d_model)
-        self.place_critic_value_mlp2 = nn.Linear(self.d_model, 1)
-
-    def forward(self, prices, orders):
-        pass
-"""

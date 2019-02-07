@@ -28,16 +28,19 @@ class Worker(object):
             self.market_encoder = LSTMCNNEncoder().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             self.proposer = ProbabilisticProposer().cpu()
+            self.proposer_gate = ProposerGate().cpu()
             self.actor_critic = ActorCritic().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             try:
                 self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
                 self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
                 self.proposer.load_state_dict(torch.load(models_loc + 'proposer.pt'))
+                self.proposer_gate.load_state_dict(torch.load(models_loc + 'proposer_gate.pt'))
                 self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt'))
                 self.market_encoder = self.market_encoder.cpu()
                 self.encoder_to_others = self.encoder_to_others.cpu()
                 self.proposer = self.proposer.cpu()
+                self.proposer_gate = self.proposer_gate.cpu()
                 self.actor_critic = self.actor_critic.cpu()
                 break
             except Exception:
@@ -55,8 +58,11 @@ class Worker(object):
         self.percents_in = []
         self.spreads = []
         self.proposed_actions = []
-        self.proposed_mus = []
+        self.queried_actions = []
+        self.cur_queried_actions = []
+        self.queried_mus = []
         self.mus = []
+        self.switch_mus = []
         self.actions = []
         self.rewards = []
 
@@ -70,20 +76,49 @@ class Worker(object):
 
         self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
 
-        self.tradeable_percentage = 0.1
 
         self.test = test
         if self.test:
+            self.tradeable_percentage = 1
             self.steps_before_trajectory = 1440 - self.trajectory_steps
+            # self.steps_before_trajectory = 100
             self.actor_temp = 1
+            self.proposer_temps = {"w":1, "mu":1, "sigma":1}
+            self.proposer_gate_temp = 1
         else:
-            self.steps_before_trajectory = 500
-            base_temp = float(self.server.get("actor_temp").decode("utf-8"))
-            self.actor_temp = np.random.exponential(base_temp / np.log(2))
+            self.tradeable_percentage = 0.01
+
+            self.steps_before_trajectory = 100
+
+            actor_base_temp = float(self.server.get("actor_temp").decode("utf-8"))
+            if np.random.rand() < 0.5:
+                self.actor_temp = np.random.exponential(actor_base_temp / np.log(2))
+            else:
+                self.actor_temp = 1
+
+            # kinda janky way to do this, but keeping track of all these variables
+            # would add a lot of overhead. and this works, soo...
+            if np.random.rand() < 0.5:
+                w_base_temp = actor_base_temp
+                mu_base_temp = 1 + (0.1) * (actor_base_temp - 1)
+                sigma_base_temp = 1 + (0.1) * (actor_base_temp - 1)
+                w_temp = np.random.exponential(w_base_temp / np.log(2))
+                mu_temp = np.random.exponential(mu_base_temp / np.log(2))
+                sigma_temp = np.random.exponential(sigma_base_temp / np.log(2))
+                self.proposer_temps = {"w":w_temp, "mu":mu_temp, "sigma":sigma_temp}
+            else:
+                self.proposer_temps = {"w":1, "mu":1, "sigma":1}
+
+            if np.random.rand() < 0.5:
+                proposer_gate_base_temp = actor_base_temp
+                self.proposer_gate_temp = np.random.exponential(proposer_gate_base_temp / np.log(2))
+            else:
+                self.proposer_gate_temp = 1
+
         self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
         self.i_step = 0
         self.steps_since_push = 0
-        self.steps_between_experiences = 2
+        self.steps_between_experiences = 0
 
         self.prev_value = self.zeus.unrealized_balance()
         self.prev_queried = None
@@ -99,10 +134,6 @@ class Worker(object):
         if len(self.time_states) >= self.window:
             percent_in = (self.zeus.position_size() / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)) / self.tradeable_percentage
 
-            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
-            reward = (self.zeus.unrealized_balance() - self.prev_value) / (2000 * self.tradeable_percentage)
-            self.prev_value = self.zeus.unrealized_balance()
-
             input_time_states = torch.Tensor(self.time_states[-self.window:]).view(self.window, 1, networks.D_BAR).cpu()
             mean = input_time_states[:, 0, :4].mean()
             std = input_time_states[:, 0, :4].std()
@@ -113,16 +144,22 @@ class Worker(object):
             market_encoding = self.market_encoder.forward(input_time_states)
             market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
 
-            if np.random.rand() < self.p_new_proposal or len(self.time_states) == self.window:
-                queried_actions, p_actions = self.proposer.forward(market_encoding)
-                self.prev_queried = queried_actions.detach()
+            """
+            a bit of semantics:
+            proposed_actions -> actions sampled from the proposer network
+            queried_actions -> proposed actions passed through the proposer gate
+            """
+            proposed_actions_, p_actions, p_w, p_mu, p_sigma = self.proposer.forward(market_encoding, True, self.proposer_temps)
+            if self.prev_queried is None:
+                cur_queried_actions_ = proposed_actions_
             else:
-                queried_actions = self.prev_queried
-                _, _, p_w, p_mu, p_sigma = self.proposer.forward(market_encoding, True)
-                p_actions = self.proposer.p(queried_actions, p_w, p_mu, p_sigma)
-            p_actions = p_actions.prod(1).view(-1, 1)
+                cur_queried_actions_ = self.prev_queried
+            queried_actions_, p_switch = self.proposer_gate.forward(market_encoding, cur_queried_actions_, proposed_actions_, self.proposer_gate_temp)
+            self.prev_queried = queried_actions_
+            p_actions = self.proposer.p(queried_actions_, p_w, p_mu, p_sigma)
+            p_actions_ = p_actions.prod(1).view(-1, 1)
 
-            policy, value = self.actor_critic.forward(market_encoding, queried_actions, self.actor_temp)
+            policy, value = self.actor_critic.forward(market_encoding, queried_actions_, self.actor_temp)
 
             if self.test:
                 action = torch.argmax(policy).item()
@@ -132,13 +169,22 @@ class Worker(object):
                 action = torch.multinomial(policy, 1).item()
 
             mu = policy[0, action].item()
-            action_mu = p_actions.item() + 1e-9
+            action_mu = p_actions_.item()
+
+            # if (action == 0 and self.time_states[-5][0][0][0] > bar.close) or (action == 1 and self.time_states[-5][0][0][0] < bar.close):
+            #     self.total_actual_reward += 0.75 - abs(queried_actions_[0, action].item() - 0.75)
+            #     reward = 0.75 - abs(queried_actions_[0, action].item() - 0.75)
+            #     # self.total_actual_reward += 1
+            #     # reward = 1
+            # else:
+            #     self.total_actual_reward += -1
+            #     reward = -1
 
             if action == 0:
                 if self.zeus.position_size() < 0:
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
-                desired_percent_in = queried_actions[0, 0].item() * self.tradeable_percentage
+                desired_percent_in = queried_actions_[0, 0].item() * self.tradeable_percentage
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
@@ -152,7 +198,7 @@ class Worker(object):
                 if self.zeus.position_size() > 0:
                     amount = int(abs(self.zeus.position_size()))
                     self.zeus.close_units(amount)
-                desired_percent_in = queried_actions[0, 1].item() * self.tradeable_percentage
+                desired_percent_in = queried_actions_[0, 1].item() * self.tradeable_percentage
                 current_percent_in = abs(self.zeus.position_size()) / (abs(self.zeus.position_size()) + self.zeus.units_available() + 1e-9)
                 diff_percent = desired_percent_in - current_percent_in
                 if diff_percent < 0:
@@ -166,6 +212,10 @@ class Worker(object):
             #     amount = int(abs(self.zeus.position_size()))
             #     self.zeus.close_units(amount)
             #     pass
+
+            self.total_actual_reward += self.zeus.unrealized_balance() - self.prev_value
+            reward = 100 * (self.zeus.unrealized_balance() - self.prev_value) / (2000 * self.tradeable_percentage)
+            self.prev_value = self.zeus.unrealized_balance()
 
 
             if self.test:
@@ -184,7 +234,8 @@ class Worker(object):
                 \naction: {a} \
                 \nunrealized_balance: {u_b} \
                 \nproposed: {prop} \
-                \nproposed probability: {prop_p} \
+                \nproposed probabilities: {prop_p} \
+                \ngate probability: {gate}\
                 \npolicy: {p} \
                 \nvalue: {v} \
                 \nrewards: {r} \
@@ -193,8 +244,9 @@ class Worker(object):
                                         p_in=round(percent_in, 8),
                                         a=action,
                                         u_b=round(self.zeus.unrealized_balance(), 2),
-                                        prop=queried_actions,
-                                        prop_p=action_mu,
+                                        prop=queried_actions_,
+                                        prop_p=p_actions,
+                                        gate=p_switch,
                                         p=policy,
                                         v=round(value.item(), 2),
                                         r=round(self.total_actual_reward, 2),
@@ -218,8 +270,11 @@ class Worker(object):
             self.rewards.append(reward)
             self.actions.append(action)
             self.mus.append(mu)
-            self.proposed_mus.append(action_mu)
-            self.proposed_actions.append(queried_actions.tolist())
+            self.switch_mus.append(p_switch.item())
+            self.queried_mus.append(action_mu)
+            self.proposed_actions.append(proposed_actions_.tolist())
+            self.queried_actions.append(queried_actions_.tolist())
+            self.cur_queried_actions.append(cur_queried_actions_.tolist())
 
             if len(self.time_states) == self.window + self.trajectory_steps + 1:
                 del self.time_states[0]
@@ -229,26 +284,35 @@ class Worker(object):
                 del self.rewards[0]
                 del self.actions[0]
                 del self.mus[0]
-                del self.proposed_mus[0]
+                del self.switch_mus[0]
+                del self.queried_mus[0]
                 del self.proposed_actions[0]
+                del self.queried_actions[0]
+                del self.cur_queried_actions[0]
 
             if (self.steps_since_push >= self.steps_between_experiences) and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
-                self.time_states,
-                self.percents_in,
-                self.spreads,
-                self.mus,
-                self.proposed_mus,
-                self.proposed_actions,
-                self.actions,
-                self.rewards
+                time_states=self.time_states,
+                percents_in=self.percents_in,
+                spreads=self.spreads,
+                mus=self.mus,
+                switch_mus=self.switch_mus,
+                queried_mus=self.queried_mus,
+                proposed_actions=self.proposed_actions,
+                queried_actions=self.queried_actions,
+                cur_queried_actions=self.cur_queried_actions,
+                place_actions=self.actions,
+                rewards=self.rewards
                 )
                 experience = msgpack.packb(experience, use_bin_type=True)
                 n_experiences = self.server.llen("experience")
                 if n_experiences > 0:
-                    loc = np.random.randint(0, n_experiences)
-                    ref = self.server.lindex("experience", loc)
-                    self.server.linsert("experience", "before", ref, experience)
+                    try:
+                        loc = np.random.randint(0, n_experiences)
+                        ref = self.server.lindex("experience", loc)
+                        self.server.linsert("experience", "before", ref, experience)
+                    except redis.exceptions.DataError:
+                        self.server.lpush("experience", experience)
                 else:
                     self.server.lpush("experience", experience)
                 self.steps_since_push = 0
@@ -271,7 +335,21 @@ class Worker(object):
             n_seconds = min(self.n_steps_left, 500) * 60
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
-        print("time: {time}, total rewards: {reward}, actor temp: {actor_temp}, steps: {steps}".format(time=round(time.time()-t0, 2), reward=round(self.total_actual_reward, 2), actor_temp=round(self.actor_temp, 5), steps=self.steps_before_trajectory))
+        print(("time: {time}, "
+                "total rewards: {reward}, "
+                "temps (actor, proposer (w, mu, sigma), gate): ({actor_temp}, ({w}, {mu}, {sigma}), {gate_temp}), "
+                "steps: {steps} ").format(
+                    time=round(time.time()-t0, 2),
+                    reward=round(self.total_actual_reward, 2),
+                    actor_temp=round(self.actor_temp, 3),
+                    w=round(self.proposer_temps['w'], 3),
+                    mu=round(self.proposer_temps['mu'], 3),
+                    sigma=round(self.proposer_temps['sigma'], 3),
+                    gate_temp=round(self.proposer_gate_temp, 3),
+                    steps=self.steps_before_trajectory
+                )
+        )
+
         if self.test:
             reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
             reward_ema = self.server.get("test_reward_ema")
@@ -291,7 +369,10 @@ Experience = namedtuple('Experience', ('time_states',
                                        'percents_in',
                                        'spreads',
                                        'mus',
-                                       'proposed_mus',
+                                       'switch_mus',
+                                       'queried_mus',
                                        'proposed_actions',
+                                       'queried_actions',
+                                       'cur_queried_actions',
                                        'place_actions',
                                        'rewards'))

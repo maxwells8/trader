@@ -21,17 +21,18 @@ if __name__ == "__main__":
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
 
-    reward_tau = 0.05
+    reward_tau = 0.01
     server.set("test_reward_tau", reward_tau)
 
     def start_process(name):
         name = "test" + name
         global n_times
-        # instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
-        # start = np.random.randint(1136073600, 1546300800)
-        instrument = "EUR_USD"
-        start = np.random.randint(1546214400, 1546819200)
-        start = np.random.randint(1546819200, 1546948800)
+        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+        start = np.random.randint(1136073600, 1548374400)
+        # instrument = "EUR_USD"
+        # start = np.random.randint(1546214400, 1546819200)
+        # start = np.random.randint(1546819200, 1546948800)
+        # start = 1546948800
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, True))
         process.start()
