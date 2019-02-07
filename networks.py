@@ -553,7 +553,7 @@ class ProposerGate(nn.Module):
         self.dropout = nn.Dropout(P_DROPOUT)
         self.layer_init = nn.Linear(D_MODEL + 2 * self.d_dist, D_MODEL)
         self.bn_init = nn.BatchNorm1d(D_MODEL)
-        self.layer_out = nn.Linear(D_MODEL, 1)
+        self.layer_out = nn.Linear(D_MODEL, 2)
 
     def forward(self, market_encoding, cur_amounts, proposed_amounts, temp=1):
         p = torch.cat([market_encoding.view(-1, D_MODEL), cur_amounts.view(-1, self.d_dist), proposed_amounts.view(-1, self.d_dist)], dim=1)
@@ -562,10 +562,9 @@ class ProposerGate(nn.Module):
         p = F.leaky_relu(p)
         p = self.layer_out(p)
         p = p / temp
-        p = torch.sigmoid(p)
+        p = F.softmax(p, dim=1)
 
-        new_amounts = torch.where(torch.rand_like(p) < p, proposed_amounts.view(-1, self.d_dist), cur_amounts.view(-1, self.d_dist))
-        return new_amounts, p
+        return p
 
 
 class ActorCritic(nn.Module):

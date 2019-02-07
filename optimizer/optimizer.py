@@ -160,6 +160,7 @@ class Optimizer(object):
             queried_actions = [*zip(*batch.queried_actions)]
             cur_queried_actions = [*zip(*batch.cur_queried_actions)]
             place_action = [*zip(*batch.place_actions)]
+            switch_action = [*zip(*batch.switch_actions)]
             reward = [*zip(*batch.rewards)]
 
             window = len(time_states) - len(percent_in)
@@ -206,7 +207,7 @@ class Optimizer(object):
                 queried = torch.Tensor(queried_actions[-i-1]).cuda().view(batch_size, -1)
                 proposed = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
                 _, proposed_pi, p_x_w, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
-                _, switch_pi = self.PG.forward(market_encoding, cur_queried, proposed)
+                p_switch = self.PG.forward(market_encoding, cur_queried, proposed)
                 queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
                 queried_pi_combined = queried_pi.prod(1).view(-1, 1)
                 policy, value = self.ACN.forward(market_encoding, queried)
@@ -214,6 +215,7 @@ class Optimizer(object):
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
                 queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
+                switch_pi = p_switch.gather(1, torch.Tensor(switch_action[-i-1]).cuda().long().view(-1, 1))
                 switch_mu = torch.Tensor(switch_mus[-i-1]).cuda().view(-1, 1)
 
                 r = torch.Tensor(reward[-i-1]).cuda().view(-1, 1)
@@ -229,7 +231,7 @@ class Optimizer(object):
                     proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (torch.log(policy + 1e-9) * policy).mean()
-                    proposed_switch_entropy_loss += (torch.log(switch_pi + 1e-9) * switch_pi).mean()
+                    proposed_switch_entropy_loss += (torch.log(p_switch + 1e-9) * p_switch).mean()
 
                     # not exactly entropy, but whatever
                     proposed_entropy_loss += (1/3) * (torch.log(p_x_w + 1e-9) * p_x_w).mean()
@@ -359,7 +361,8 @@ class Optimizer(object):
             print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
             print()
 
-            print("gate min mean std max:\n", round(switch_pi.cpu().detach().min().item(), 7), round(switch_pi.cpu().detach().mean().item(), 7), round(switch_pi.cpu().detach().std().item(), 7), round(switch_pi.cpu().detach().max().item(), 7))
+            print("switch policy[0] min mean std max:\n", round(p_switch[:, 0].cpu().detach().min().item(), 7), round(p_switch[:, 0].cpu().detach().mean().item(), 7), round(p_switch[:, 0].cpu().detach().std().item(), 7), round(p_switch[:, 0].cpu().detach().max().item(), 7))
+            print("switch policy[1] min mean std max:\n", round(p_switch[:, 1].cpu().detach().min().item(), 7), round(p_switch[:, 1].cpu().detach().mean().item(), 7), round(p_switch[:, 1].cpu().detach().std().item(), 7), round(p_switch[:, 1].cpu().detach().max().item(), 7))
             print()
 
             print("value min mean std max:\n", round(value.cpu().detach().min().item(), 7), round(value.cpu().detach().mean().item(), 7), round(value.cpu().detach().std().item(), 7), round(value.cpu().detach().max().item(), 7))
@@ -371,4 +374,6 @@ class Optimizer(object):
             print("weighted actor entropy loss:", round(float(actor_entropy_loss * self.actor_entropy_weight), 7))
             print("weighted proposer v loss:", round(float(proposed_v_loss * self.proposed_v_weight), 7))
             print("weighted proposer entropy loss:", round(float(proposed_entropy_loss * self.proposed_entropy_weight), 7))
+            print("weighted proposer switch v loss:", round(float(proposed_switch_v_loss * self.proposed_switch_v_weight), 7))
+            print("weighted proposer switch entropy loss:", round(float(proposed_switch_entropy_loss * self.proposed_switch_entropy_weight), 7))
             print('-----------------------------------------------------------')

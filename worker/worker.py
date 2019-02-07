@@ -64,6 +64,7 @@ class Worker(object):
         self.mus = []
         self.switch_mus = []
         self.actions = []
+        self.switch_actions = []
         self.rewards = []
 
         self.total_actual_reward = 0
@@ -154,7 +155,16 @@ class Worker(object):
                 cur_queried_actions_ = proposed_actions_
             else:
                 cur_queried_actions_ = self.prev_queried
-            queried_actions_, p_switch = self.proposer_gate.forward(market_encoding, cur_queried_actions_, proposed_actions_, self.proposer_gate_temp)
+            p_switch = self.proposer_gate.forward(market_encoding, cur_queried_actions_, proposed_actions_, self.proposer_gate_temp)
+
+            if self.test:
+                switch_action = torch.argmax(p_switch)
+            else:
+                switch_action = torch.multinomial(p_switch, 1).item()
+
+            switch_mu = p_switch[0, switch_action].item()
+            queried_actions_ = proposed_actions_ if switch_action == 0 else cur_queried_actions_
+
             self.prev_queried = queried_actions_
             p_actions = self.proposer.p(queried_actions_, p_w, p_mu, p_sigma)
             p_actions_ = p_actions.prod(1).view(-1, 1)
@@ -244,10 +254,10 @@ class Worker(object):
                                         p_in=round(percent_in, 8),
                                         a=action,
                                         u_b=round(self.zeus.unrealized_balance(), 2),
-                                        prop=queried_actions_,
-                                        prop_p=p_actions,
-                                        gate=p_switch,
-                                        p=policy,
+                                        prop=queried_actions_.tolist(),
+                                        prop_p=p_actions.tolist(),
+                                        gate=p_switch.tolist(),
+                                        p=policy.tolist(),
                                         v=round(value.item(), 2),
                                         r=round(self.total_actual_reward, 2),
                                         ema=round(reward_ema, 2),
@@ -269,8 +279,9 @@ class Worker(object):
             self.spreads.append(bar.spread)
             self.rewards.append(reward)
             self.actions.append(action)
+            self.switch_actions.append(switch_action)
             self.mus.append(mu)
-            self.switch_mus.append(p_switch.item())
+            self.switch_mus.append(switch_mu)
             self.queried_mus.append(action_mu)
             self.proposed_actions.append(proposed_actions_.tolist())
             self.queried_actions.append(queried_actions_.tolist())
@@ -283,6 +294,7 @@ class Worker(object):
                 del self.spreads[0]
                 del self.rewards[0]
                 del self.actions[0]
+                del self.switch_actions[0]
                 del self.mus[0]
                 del self.switch_mus[0]
                 del self.queried_mus[0]
@@ -302,6 +314,7 @@ class Worker(object):
                 queried_actions=self.queried_actions,
                 cur_queried_actions=self.cur_queried_actions,
                 place_actions=self.actions,
+                switch_actions=self.switch_actions,
                 rewards=self.rewards
                 )
                 experience = msgpack.packb(experience, use_bin_type=True)
@@ -375,4 +388,5 @@ Experience = namedtuple('Experience', ('time_states',
                                        'queried_actions',
                                        'cur_queried_actions',
                                        'place_actions',
+                                       'switch_actions',
                                        'rewards'))
