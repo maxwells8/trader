@@ -8,7 +8,7 @@ import time
 import heapq
 import sys
 sys.path.insert(0, '../worker')
-from simple_worker import Experience
+from simple_worker_regressor import Experience
 import networks
 from networks import *
 from environment import *
@@ -23,7 +23,6 @@ class Optimizer(object):
         self.server = redis.Redis("localhost")
         self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
-        self.n_steps_to_save = int(self.server.get("n_steps_to_save").decode("utf-8"))
 
         self.models_loc = models_loc
 
@@ -73,7 +72,6 @@ class Optimizer(object):
             n_param_encoder += n_param_
         print("encoder number of parameters:", n_param_encoder)
 
-        self.advantage_weight = float(self.server.get("advantage_weight").decode("utf-8"))
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
@@ -209,21 +207,20 @@ class Optimizer(object):
                 neg=round(neg_ema, 5)
             ))
 
-            if step % self.n_steps_to_save == 0:
-                try:
-                    torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")
-                    torch.save(self.decoder.state_dict(), self.models_loc + "decoder.pt")
-                    cur_state = {
-                        'n_samples':n_samples,
-                        'steps':step,
-                        'pos_ema':pos_ema,
-                        'neg_ema':neg_ema,
-                        'value_ema':value_ema,
-                        'optimizer':self.optimizer.state_dict()
-                    }
-                    torch.save(cur_state, self.models_loc + 'encoder_train.pt')
-                except Exception as e:
-                    print("failed to save")
+            try:
+                torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")
+                torch.save(self.decoder.state_dict(), self.models_loc + "decoder.pt")
+                cur_state = {
+                    'n_samples':n_samples,
+                    'steps':step,
+                    'pos_ema':pos_ema,
+                    'neg_ema':neg_ema,
+                    'value_ema':value_ema,
+                    'optimizer':self.optimizer.state_dict()
+                }
+                torch.save(cur_state, self.models_loc + 'encoder_train.pt')
+            except Exception as e:
+                print("failed to save")
 
             if t == 0:
                 t = time.time() - t0

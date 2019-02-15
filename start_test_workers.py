@@ -30,7 +30,6 @@ if __name__ == "__main__":
         instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
         start = np.random.randint(1136073600, 1548374400)
         # instrument = "EUR_USD"
-        # start = np.random.randint(1546214400, 1546819200)
         # start = np.random.randint(1546819200, 1546948800)
         # start = 1546948800
 
@@ -47,7 +46,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 300:
+            while process.is_alive() and time.time() - times[i] < 120:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

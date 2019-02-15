@@ -31,7 +31,7 @@ class Worker(object):
 
         self.step = 0
 
-        n_allowed = 4
+        n_allowed = self.n_steps
         self.allowed_steps = np.random.choice([i for i in range(1, self.n_steps + 1)], n_allowed)
 
     def add_bar(self, bar):

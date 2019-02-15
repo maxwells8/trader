@@ -26,26 +26,26 @@ class Optimizer(object):
         self.models_loc = models_loc
         self.MEN = LSTMCNNEncoder().cuda()
         self.ETO = EncoderToOthers().cuda()
-        self.PN = ProbabilisticProposer().cuda()
-        self.PG = ProposerGate().cuda()
+        # self.PN = ProbabilisticProposer().cuda()
+        # self.PG = ProposerGate().cuda()
         self.ACN = ActorCritic().cuda()
         try:
             self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
             self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
-            self.PN.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
-            self.PG.load_state_dict(torch.load(self.models_loc + 'proposer_gate.pt'))
+            # self.PN.load_state_dict(torch.load(self.models_loc + 'proposer.pt'))
+            # self.PG.load_state_dict(torch.load(self.models_loc + 'proposer_gate.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
         except FileNotFoundError:
             self.MEN = LSTMCNNEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
-            self.PN = ProbabilisticProposer().cuda()
-            self.PG = ProposerGate().cuda()
+            # self.PN = ProbabilisticProposer().cuda()
+            # self.PG = ProposerGate().cuda()
             self.ACN = ActorCritic().cuda()
 
             torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
-            torch.save(self.PN.state_dict(), self.models_loc + 'proposer.pt')
-            torch.save(self.PG.state_dict(), self.models_loc + 'proposer_gate.pt')
+            # torch.save(self.PN.state_dict(), self.models_loc + 'proposer.pt')
+            # torch.save(self.PG.state_dict(), self.models_loc + 'proposer_gate.pt')
             torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
 
         self.server = redis.Redis("localhost")
@@ -55,13 +55,13 @@ class Optimizer(object):
         self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
         self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))]).cuda()
 
-        self.proposed_v_weight = float(self.server.get("proposed_v_weight").decode("utf-8"))
-        self.proposed_entropy_weight = float(self.server.get("proposed_entropy_weight").decode("utf-8"))
         self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
         self.actor_v_weight = float(self.server.get("actor_v_weight").decode("utf-8"))
         self.actor_entropy_weight = float(self.server.get("actor_entropy_weight").decode("utf-8"))
-        self.proposed_switch_v_weight = float(self.server.get("proposed_switch_v_weight").decode("utf-8"))
-        self.proposed_switch_entropy_weight = float(self.server.get("proposed_switch_entropy_weight").decode("utf-8"))
+        # self.proposed_v_weight = float(self.server.get("proposed_v_weight").decode("utf-8"))
+        # self.proposed_entropy_weight = float(self.server.get("proposed_entropy_weight").decode("utf-8"))
+        # self.proposed_switch_v_weight = float(self.server.get("proposed_switch_v_weight").decode("utf-8"))
+        # self.proposed_switch_entropy_weight = float(self.server.get("proposed_switch_entropy_weight").decode("utf-8"))
         self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
 
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
@@ -74,8 +74,8 @@ class Optimizer(object):
         try:
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
                                         [param for param in self.ETO.parameters()] +
-                                        [param for param in self.PN.parameters()] +
-                                        [param for param in self.PG.parameters()] +
+                                        # [param for param in self.PN.parameters()] +
+                                        # [param for param in self.PG.parameters()] +
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
@@ -88,14 +88,14 @@ class Optimizer(object):
         except:
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
                                         [param for param in self.ETO.parameters()] +
-                                        [param for param in self.PN.parameters()] +
-                                        [param for param in self.PG.parameters()] +
+                                        # [param for param in self.PN.parameters()] +
+                                        # [param for param in self.PG.parameters()] +
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
             self.start_step = 0
             self.start_n_samples = 0
-            self.actor_temp = 20
+            self.actor_temp = 5
             cur_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
@@ -104,14 +104,14 @@ class Optimizer(object):
             }
             torch.save(self.optimizer.state_dict(), self.models_loc + 'rl_train.pt')
 
-        self.original_actor_temp = 20
+        self.original_actor_temp = 5
         self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
         self.MEN.train()
         self.ETO.train()
-        self.PN.train()
-        self.PG.train()
+        # self.PN.train()
+        # self.PG.train()
         self.ACN.train()
 
         prev_reward_ema = None
@@ -154,13 +154,7 @@ class Optimizer(object):
             percent_in = [*zip(*batch.percents_in)]
             spread = [*zip(*batch.spreads)]
             mu = [*zip(*batch.mus)]
-            switch_mus = [*zip(*batch.switch_mus)]
-            queried_mus = [*zip(*batch.queried_mus)]
-            proposed_actions = [*zip(*batch.proposed_actions)]
-            queried_actions = [*zip(*batch.queried_actions)]
-            cur_queried_actions = [*zip(*batch.cur_queried_actions)]
             place_action = [*zip(*batch.place_actions)]
-            switch_action = [*zip(*batch.switch_actions)]
             reward = [*zip(*batch.rewards)]
 
             window = len(time_states) - len(percent_in)
@@ -174,10 +168,10 @@ class Optimizer(object):
             critic_loss = torch.Tensor([0]).cuda()
             actor_v_loss = torch.Tensor([0]).cuda()
             actor_entropy_loss = torch.Tensor([0]).cuda()
-            proposed_switch_v_loss = torch.Tensor([0]).cuda()
-            proposed_switch_entropy_loss = torch.Tensor([0]).cuda()
-            proposed_v_loss = torch.Tensor([0]).cuda()
-            proposed_entropy_loss = torch.Tensor([0]).cuda()
+            # proposed_switch_v_loss = torch.Tensor([0]).cuda()
+            # proposed_switch_entropy_loss = torch.Tensor([0]).cuda()
+            # proposed_v_loss = torch.Tensor([0]).cuda()
+            # proposed_entropy_loss = torch.Tensor([0]).cuda()
 
             time_states_ = torch.cat(time_states[-window:], dim=1).detach().cuda()
             mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
@@ -188,8 +182,7 @@ class Optimizer(object):
 
             market_encoding = self.MEN.forward(time_states_)
             market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[-1]).cuda())
-            queried = torch.Tensor(queried_actions[-1]).cuda().view(batch_size, -1)
-            policy, value = self.ACN.forward(market_encoding, queried)
+            policy, value = self.ACN.forward(market_encoding)
 
             v_next = value.detach()
             v_trace = value.detach()
@@ -203,51 +196,53 @@ class Optimizer(object):
 
                 market_encoding = self.MEN.forward(time_states_)
                 market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[-i-1]).cuda())
-                cur_queried = torch.Tensor(cur_queried_actions[-i-1]).cuda().view(batch_size, -1)
-                queried = torch.Tensor(queried_actions[-i-1]).cuda().view(batch_size, -1)
-                proposed = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
-                _, proposed_pi, p_x_w, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
-                p_switch = self.PG.forward(market_encoding, cur_queried, proposed)
-                queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
-                queried_pi_combined = queried_pi.prod(1).view(-1, 1)
-                policy, value = self.ACN.forward(market_encoding, queried)
+                policy, value = self.ACN.forward(market_encoding)
+                # cur_queried = torch.Tensor(cur_queried_actions[-i-1]).cuda().view(batch_size, -1)
+                # proposed = torch.Tensor(proposed_actions[-i-1]).cuda().view(batch_size, -1)
+                # _, proposed_pi, p_x_w, p_x_mu, p_x_sigma = self.PN.forward(market_encoding, return_params=True)
+                # p_switch = self.PG.forward(market_encoding, cur_queried, proposed)
+                # queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
+                # queried_pi_combined = queried_pi.prod(1).view(-1, 1)
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
                 mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
-                queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
-                switch_pi = p_switch.gather(1, torch.Tensor(switch_action[-i-1]).cuda().long().view(-1, 1))
-                switch_mu = torch.Tensor(switch_mus[-i-1]).cuda().view(-1, 1)
+                # queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
+                # switch_pi = p_switch.gather(1, torch.Tensor(switch_action[-i-1]).cuda().long().view(-1, 1))
+                # switch_mu = torch.Tensor(switch_mus[-i-1]).cuda().view(-1, 1)
 
                 r = torch.Tensor(reward[-i-1]).cuda().view(-1, 1)
 
                 if i == self.trajectory_steps - 1:
-                    rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9) *
-                                    queried_pi_combined / (queried_mu + 1e-9) *
-                                    switch_pi / (switch_mu + 1e-9))
+                    # rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9) *
+                    #                 queried_pi_combined / (queried_mu + 1e-9) *
+                    #                 switch_pi / (switch_mu + 1e-9))
+                    rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9))
                     advantage_v = rho * (r + self.gamma * v_trace - value)
 
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * advantage_v.detach()).mean()
-                    proposed_switch_v_loss += (-torch.log(switch_pi + 1e-9) * advantage_v.detach()).mean()
-                    proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
+                    # proposed_switch_v_loss += (-torch.log(switch_pi + 1e-9) * advantage_v.detach()).mean()
+                    # proposed_v_loss += (-torch.log(queried_pi_combined + 1e-9) * advantage_v.detach()).mean()
 
                     actor_entropy_loss += (torch.log(policy + 1e-9) * policy).mean()
-                    proposed_switch_entropy_loss += (torch.log(p_switch + 1e-9) * p_switch).mean()
+                    # proposed_switch_entropy_loss += (torch.log(p_switch + 1e-9) * p_switch).mean()
 
                     # not exactly entropy, but whatever
-                    proposed_entropy_loss += (1/3) * (torch.log(p_x_w + 1e-9) * p_x_w).mean()
-                    proposed_entropy_loss += (1/3) * F.l1_loss(p_x_mu, torch.zeros_like(p_x_mu, device=p_x_mu.device))
-                    proposed_entropy_loss += (1/3) * F.l1_loss(p_x_sigma, torch.ones_like(p_x_sigma, device=p_x_sigma.device))
+                    # proposed_entropy_loss += (1/3) * (torch.log(p_x_w + 1e-9) * p_x_w).mean()
+                    # proposed_entropy_loss += (1/3) * F.l1_loss(p_x_mu, torch.zeros_like(p_x_mu, device=p_x_mu.device))
+                    # proposed_entropy_loss += (1/3) * F.l1_loss(p_x_sigma, torch.ones_like(p_x_sigma, device=p_x_sigma.device))
                     # rand_x = torch.rand_like(queried, device=queried.device)
                     # p_rand = self.PN.p(rand_x, p_x_w, p_x_mu, p_x_sigma)
                     # proposed_entropy_loss += (torch.log(p_rand + 1e-9) * p_rand).mean()
                     # proposed_entropy_loss += F.mse_loss(p_rand, torch.ones_like(p_rand, device=p_rand.device))
 
-                rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9) *
-                                queried_pi_combined / (queried_mu + 1e-9) *
-                                switch_pi / (switch_mu + 1e-9))
-                c = torch.min(self.max_c, pi_ / (mu_ + 1e-9) *
-                                queried_pi_combined / (queried_mu + 1e-9) *
-                                switch_pi / (switch_mu + 1e-9))
+                # rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9) *
+                #                 queried_pi_combined / (queried_mu + 1e-9) *
+                #                 switch_pi / (switch_mu + 1e-9))
+                rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9))
+                # c = torch.min(self.max_c, pi_ / (mu_ + 1e-9) *
+                #                 queried_pi_combined / (queried_mu + 1e-9) *
+                #                 switch_pi / (switch_mu + 1e-9))
+                c = torch.min(self.max_c, pi_ / (mu_ + 1e-9))
                 delta_v = rho * (r + self.gamma * v_next - value)
 
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
@@ -258,19 +253,19 @@ class Optimizer(object):
                 v_next = value.detach()
 
             total_loss = torch.Tensor([0]).cuda()
-            total_loss += proposed_entropy_loss * self.proposed_entropy_weight
-            total_loss += proposed_v_loss * self.proposed_v_weight
             total_loss += critic_loss * self.critic_weight
             total_loss += actor_v_loss * self.actor_v_weight
             total_loss += actor_entropy_loss * self.actor_entropy_weight
-            total_loss += proposed_switch_v_loss * self.proposed_switch_v_weight
-            total_loss += proposed_switch_entropy_loss * self.proposed_switch_entropy_weight
+            # total_loss += proposed_v_loss * self.proposed_v_weight
+            # total_loss += proposed_entropy_loss * self.proposed_entropy_weight
+            # total_loss += proposed_switch_v_loss * self.proposed_switch_v_weight
+            # total_loss += proposed_switch_entropy_loss * self.proposed_switch_entropy_weight
 
             try:
                 assert torch.isnan(total_loss).sum() == 0
             except AssertionError:
-                print("proposed_v_loss", proposed_v_loss)
-                print("proposed_entropy_loss", proposed_entropy_loss)
+                # print("proposed_v_loss", proposed_v_loss)
+                # print("proposed_entropy_loss", proposed_entropy_loss)
                 print("critic_loss", critic_loss)
                 print("actor_v_loss", actor_v_loss)
                 print("actor_entropy_loss", actor_entropy_loss)
@@ -288,8 +283,8 @@ class Optimizer(object):
             try:
                 torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
                 torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
-                torch.save(self.PN.state_dict(), self.models_loc + "proposer.pt")
-                torch.save(self.PG.state_dict(), self.models_loc + "proposer_gate.pt")
+                # torch.save(self.PN.state_dict(), self.models_loc + "proposer.pt")
+                # torch.save(self.PG.state_dict(), self.models_loc + "proposer_gate.pt")
                 torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
                 cur_state = {
                     'n_samples':n_samples,
@@ -309,8 +304,8 @@ class Optimizer(object):
                         os.makedirs(self.models_loc + 'model_history/{step}'.format(step=step))
                     torch.save(self.MEN.state_dict(), self.models_loc + 'model_history/{step}/market_encoder.pt'.format(step=step))
                     torch.save(self.ETO.state_dict(), self.models_loc + 'model_history/{step}/encoder_to_others.pt'.format(step=step))
-                    torch.save(self.PN.state_dict(), self.models_loc + "model_history/{step}/proposer.pt".format(step=step))
-                    torch.save(self.PG.state_dict(), self.models_loc + "model_history/{step}/proposer_gate.pt".format(step=step))
+                    # torch.save(self.PN.state_dict(), self.models_loc + "model_history/{step}/proposer.pt".format(step=step))
+                    # torch.save(self.PG.state_dict(), self.models_loc + "model_history/{step}/proposer_gate.pt".format(step=step))
                     torch.save(self.ACN.state_dict(), self.models_loc + "model_history/{step}/actor_critic.pt".format(step=step))
                     cur_state = {
                         'n_samples':n_samples,
@@ -343,27 +338,26 @@ class Optimizer(object):
             print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=step, t=round(time.time()-t0, 5)))
             print()
 
-            print("policy[0] min mean std max:\n", round(policy[:, 0].cpu().detach().min().item(), 7), round(policy[:, 0].cpu().detach().mean().item(), 7), round(policy[:, 0].cpu().detach().std().item(), 7), round(policy[:, 0].cpu().detach().max().item(), 7))
-            print("policy[1] min mean std max:\n", round(policy[:, 1].cpu().detach().min().item(), 7), round(policy[:, 1].cpu().detach().mean().item(), 7), round(policy[:, 1].cpu().detach().std().item(), 7), round(policy[:, 1].cpu().detach().max().item(), 7))
-            print("policy[2] min mean std max:\n", round(policy[:, 2].cpu().detach().min().item(), 7), round(policy[:, 2].cpu().detach().mean().item(), 7), round(policy[:, 2].cpu().detach().std().item(), 7), round(policy[:, 2].cpu().detach().max().item(), 7))
+            for i in range(policy.size()[1]):
+                print("policy[{i}] min mean std max:\n".format(i=i), round(policy[:, i].cpu().detach().min().item(), 7), round(policy[:, i].cpu().detach().mean().item(), 7), round(policy[:, i].cpu().detach().std().item(), 7), round(policy[:, i].cpu().detach().max().item(), 7))
             print()
 
-            print("proposed[0] min mean std max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().std().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))
-            print("proposed[1] min mean std max:\n", round(proposed[:, 1].cpu().detach().min().item(), 7), round(proposed[:, 1].cpu().detach().mean().item(), 7), round(proposed[:, 1].cpu().detach().std().item(), 7), round(proposed[:, 1].cpu().detach().max().item(), 7))
-            print()
-
-            print("proposed probabilities min mean std max:\n", round(proposed_pi.cpu().detach().min().item(), 7), round(proposed_pi.cpu().detach().mean().item(), 7), round(proposed_pi.cpu().detach().std().item(), 7), round(proposed_pi.cpu().detach().max().item(), 7))
-            print("queried probabilities min mean std max:\n", round(queried_pi.cpu().detach().min().item(), 7), round(queried_pi.cpu().detach().mean().item(), 7), round(queried_pi.cpu().detach().std().item(), 7), round(queried_pi.cpu().detach().max().item(), 7))
-            print()
-
-            queried_actions = torch.Tensor(proposed_actions)
-            print("queried[0] min mean std max:\n", round(queried_actions[:, :, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().max().item(), 7))
-            print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
-            print()
-
-            print("switch policy[0] min mean std max:\n", round(p_switch[:, 0].cpu().detach().min().item(), 7), round(p_switch[:, 0].cpu().detach().mean().item(), 7), round(p_switch[:, 0].cpu().detach().std().item(), 7), round(p_switch[:, 0].cpu().detach().max().item(), 7))
-            print("switch policy[1] min mean std max:\n", round(p_switch[:, 1].cpu().detach().min().item(), 7), round(p_switch[:, 1].cpu().detach().mean().item(), 7), round(p_switch[:, 1].cpu().detach().std().item(), 7), round(p_switch[:, 1].cpu().detach().max().item(), 7))
-            print()
+            # print("proposed[0] min mean std max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().std().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))
+            # print("proposed[1] min mean std max:\n", round(proposed[:, 1].cpu().detach().min().item(), 7), round(proposed[:, 1].cpu().detach().mean().item(), 7), round(proposed[:, 1].cpu().detach().std().item(), 7), round(proposed[:, 1].cpu().detach().max().item(), 7))
+            # print()
+            #
+            # print("proposed probabilities min mean std max:\n", round(proposed_pi.cpu().detach().min().item(), 7), round(proposed_pi.cpu().detach().mean().item(), 7), round(proposed_pi.cpu().detach().std().item(), 7), round(proposed_pi.cpu().detach().max().item(), 7))
+            # print("queried probabilities min mean std max:\n", round(queried_pi.cpu().detach().min().item(), 7), round(queried_pi.cpu().detach().mean().item(), 7), round(queried_pi.cpu().detach().std().item(), 7), round(queried_pi.cpu().detach().max().item(), 7))
+            # print()
+            #
+            # queried_actions = torch.Tensor(proposed_actions)
+            # print("queried[0] min mean std max:\n", round(queried_actions[:, :, :, 0].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 0].cpu().detach().max().item(), 7))
+            # print("queried[1] min mean std max:\n", round(queried_actions[:, :, :, 1].cpu().detach().min().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().mean().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().std().item(), 7), round(queried_actions[:, :, :, 1].cpu().detach().max().item(), 7))
+            # print()
+            #
+            # print("switch policy[0] min mean std max:\n", round(p_switch[:, 0].cpu().detach().min().item(), 7), round(p_switch[:, 0].cpu().detach().mean().item(), 7), round(p_switch[:, 0].cpu().detach().std().item(), 7), round(p_switch[:, 0].cpu().detach().max().item(), 7))
+            # print("switch policy[1] min mean std max:\n", round(p_switch[:, 1].cpu().detach().min().item(), 7), round(p_switch[:, 1].cpu().detach().mean().item(), 7), round(p_switch[:, 1].cpu().detach().std().item(), 7), round(p_switch[:, 1].cpu().detach().max().item(), 7))
+            # print()
 
             print("value min mean std max:\n", round(value.cpu().detach().min().item(), 7), round(value.cpu().detach().mean().item(), 7), round(value.cpu().detach().std().item(), 7), round(value.cpu().detach().max().item(), 7))
             print("v_trace min mean std max:\n", round(v_trace.cpu().detach().min().item(), 7), round(v_trace.cpu().detach().mean().item(), 7), round(v_trace.cpu().detach().std().item(), 7), round(v_trace.cpu().detach().max().item(), 7))
@@ -372,8 +366,8 @@ class Optimizer(object):
             print("weighted critic loss:", round(float(critic_loss * self.critic_weight), 7))
             print("weighted actor v loss:", round(float(actor_v_loss * self.actor_v_weight), 7))
             print("weighted actor entropy loss:", round(float(actor_entropy_loss * self.actor_entropy_weight), 7))
-            print("weighted proposer v loss:", round(float(proposed_v_loss * self.proposed_v_weight), 7))
-            print("weighted proposer entropy loss:", round(float(proposed_entropy_loss * self.proposed_entropy_weight), 7))
-            print("weighted proposer switch v loss:", round(float(proposed_switch_v_loss * self.proposed_switch_v_weight), 7))
-            print("weighted proposer switch entropy loss:", round(float(proposed_switch_entropy_loss * self.proposed_switch_entropy_weight), 7))
+            # print("weighted proposer v loss:", round(float(proposed_v_loss * self.proposed_v_weight), 7))
+            # print("weighted proposer entropy loss:", round(float(proposed_entropy_loss * self.proposed_entropy_weight), 7))
+            # print("weighted proposer switch v loss:", round(float(proposed_switch_v_loss * self.proposed_switch_v_weight), 7))
+            # print("weighted proposer switch entropy loss:", round(float(proposed_switch_entropy_loss * self.proposed_switch_entropy_weight), 7))
             print('-----------------------------------------------------------')

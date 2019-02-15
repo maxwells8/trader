@@ -8,9 +8,9 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 128
-WINDOW = 240
-P_DROPOUT = 0.1
+D_MODEL = 256
+WINDOW = 180
+P_DROPOUT = 0.25
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -186,7 +186,7 @@ class LSTMCNNEncoder(nn.Module):
     def __init__(self):
         super(LSTMCNNEncoder, self).__init__()
 
-        self.n_lstm_layers = 2
+        self.n_lstm_layers = 1
         self.lstm_in_dim = int(D_MODEL / 8)
         self.lstm_hidden_dim = int(D_MODEL / 4)
         self.n_init_channels = int(D_MODEL / 4)
@@ -194,25 +194,22 @@ class LSTMCNNEncoder(nn.Module):
         self.kernel_sizes = [3, 3]
         self.pool_kernel_size = 2
 
+
         self.bar_to_lstm = nn.Sequential(
                                 nn.Linear(D_BAR, self.lstm_in_dim),
-                                nn.Dropout(P_DROPOUT),
-                                nn.LeakyReLU(),
-                                nn.Linear(self.lstm_in_dim, self.lstm_in_dim)
+                                nn.LeakyReLU()
                             )
 
         self.lstm = nn.LSTM(input_size=self.lstm_in_dim,
                             hidden_size=self.lstm_hidden_dim,
                             num_layers=self.n_lstm_layers,
-                            batch_first=True,
-                            dropout=P_DROPOUT)
+                            batch_first=True)
 
         self.lstm_to_conv = nn.Sequential(
-                                nn.Linear(self.lstm_hidden_dim, self.lstm_hidden_dim),
-                                nn.Dropout(P_DROPOUT),
-                                nn.LeakyReLU(),
-                                nn.Linear(self.lstm_hidden_dim, self.n_init_channels - D_BAR)
+                                nn.Linear(self.lstm_hidden_dim, self.n_init_channels - D_BAR),
+                                nn.LeakyReLU()
                             )
+
 
         self.conv1 = nn.Conv1d(in_channels=self.n_init_channels,
                                 out_channels=self.n_channels[0],
@@ -226,6 +223,7 @@ class LSTMCNNEncoder(nn.Module):
 
         self.pool = nn.AvgPool1d(self.pool_kernel_size)
 
+
         self.L_in = WINDOW
         for k in self.kernel_sizes:
             self.L_in = math.floor(self.L_in - k + 1)
@@ -233,7 +231,8 @@ class LSTMCNNEncoder(nn.Module):
         self.L_in = int(self.L_in)
 
         self.n_fc_layers = 1
-        begin_dim = self.L_in * self.n_channels[-1]
+        self.conv_out_dim = self.L_in * self.n_channels[-1]
+        begin_dim = self.conv_out_dim
         end_dim = D_MODEL
         # scale down the layer size linearly from begin_dim to end_dim
         self.fc_layers = nn.ModuleList([nn.Linear(int((end_dim - begin_dim) * n / self.n_fc_layers + begin_dim), int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
@@ -263,7 +262,7 @@ class LSTMCNNEncoder(nn.Module):
         x = self.pool(x)
         x = F.leaky_relu(x)
 
-        x = x.squeeze().view(-1, self.L_in * self.n_channels[-1])
+        x = x.squeeze().view(-1, self.conv_out_dim)
 
         for i in range(self.n_fc_layers):
             x = self.fc_layers[i](x)
@@ -306,16 +305,12 @@ class MarketEncoder(nn.Module):
 
 class AttentionMarketEncoder(nn.Module):
 
-    def __init__(self, device='cuda'):
-        """
-        if you're gonna use this, fix the layer normalization first
-        """
+    def __init__(self):
         super(AttentionMarketEncoder, self).__init__()
-        self.device = device
 
-        self.Ns = [2, 2, 2, 2]
+        self.Ns = [4]
         self.h = 8
-        self.fc_out_middle_size = D_MODEL * 2
+        self.fc_out_middle_size = D_MODEL
 
         self.d_k = int(D_MODEL / self.h)
         self.d_v = int(D_MODEL / self.h)
@@ -323,8 +318,6 @@ class AttentionMarketEncoder(nn.Module):
         self.n_entities = WINDOW
 
         self.fc_bar = nn.Linear(D_BAR + 1, D_MODEL)
-        self.in_gain_ = nn.Parameter(torch.zeros(D_MODEL))
-        self.in_bias = nn.Parameter(torch.zeros(D_MODEL))
 
         self.WQs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
         self.WKs = nn.ModuleList([nn.Linear(D_MODEL, self.d_k, bias=False) for _ in range(self.h * len(self.Ns))])
@@ -344,18 +337,16 @@ class AttentionMarketEncoder(nn.Module):
     def forward(self, market_values):
         time_states = []
         for i, time_state in enumerate(market_values):
-            if self.device == 'cuda':
-                time_states.append(torch.cat([time_state.cuda(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cuda()], dim=1).view(1, -1, D_BAR+1))
-            else:
-                time_states.append(torch.cat([time_state.cpu(), torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)]).repeat(time_state.size()[0]).view(-1, 1).cpu()], dim=1).view(1, -1, D_BAR+1))
+            time_tag = torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)], device=time_state.device).repeat(time_state.size()[0]).view(-1, 1)
+            # time_tag.device = time_state.device
+            if time_state.device == torch.device('cuda:' + str(torch.cuda.current_device())):
+                time_tag = time_tag.cuda()
 
-        time_states = torch.cat(time_states, dim=0)
-        inputs_ = [F.leaky_relu(self.fc_bar(time_states.view(WINDOW, -1, D_BAR + 1)))]
-        inputs_ = torch.cat(inputs_).transpose(0, 1)
-        inputs_mean = inputs_.mean(dim=2).view(-1, self.n_entities, 1)
-        inputs_std = inputs_.std(dim=2).view(-1, self.n_entities, 1)
-        inputs = (inputs_ - inputs_mean) / (inputs_std + 1e-9)
-        inputs = inputs * (self.in_gain_ + 1) + self.in_bias
+            time_state_ = torch.cat([time_state, time_tag], dim=1).view(1, -1, D_BAR+1)
+            time_state_ = self.fc_bar(time_state_)
+            time_states.append(time_state_)
+
+        inputs = torch.cat(time_states, dim=0)
 
         for i_N, N in enumerate(self.Ns):
             n_N = int(np.sum(self.Ns[:i_N]))
@@ -375,37 +366,64 @@ class AttentionMarketEncoder(nn.Module):
 
                 heads = torch.cat(heads, dim=2)
                 out = self.WOs[i_N](heads) + inputs
-                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
-                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                out_mean = out.mean(dim=2).view(WINDOW, -1, 1)
+                out_std = out.std(dim=2).view(WINDOW, -1, 1)
                 out = (out - out_mean) / (out_std + 1e-9)
                 out = out * (self.a_gain_[n_N + j] + 1) + self.a_bias[n_N + j]
 
                 out = F.leaky_relu(self.fc_out1[n_N + j](out))
                 out = self.fc_out2[n_N + j](out) + inputs
-                out_mean = out.mean(dim=2).view(-1, self.n_entities, 1)
-                out_std = out.std(dim=2).view(-1, self.n_entities, 1)
+                out_mean = out.mean(dim=2).view(WINDOW, -1, 1)
+                out_std = out.std(dim=2).view(WINDOW, -1, 1)
                 inputs = (out - out_mean) / (out_std + 1e-9)
                 inputs = inputs * (self.fc_out_gain_[n_N + j] + 1) + self.fc_out_bias[n_N + j]
 
-        outputs = F.leaky_relu(self.fc_final(inputs.transpose(1, 2))).view(-1, D_MODEL)
+        outputs = F.leaky_relu(self.fc_final(inputs.transpose(0, 2))).view(-1, D_MODEL)
         return outputs
 
+    def layer_norm(self, layer, gain, bias):
+
+        pass
 
 class Decoder(nn.Module):
 
     def __init__(self):
         super(Decoder, self).__init__()
-        self.fc1 = nn.Linear(D_MODEL + 2, D_MODEL)
-        self.fc2 = nn.Linear(D_MODEL, D_MODEL)
-        self.fc3 = nn.Linear(D_MODEL, 2)
+        self.initial_layer = nn.Linear(D_MODEL + 2, D_MODEL)
+        self.initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
+
+        self.n_layers = 2
+        self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
+        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_layers)])
+
+        self.final_layer = nn.Linear(D_MODEL, 2)
+
+        self.dropout = nn.Dropout(P_DROPOUT)
 
     def forward(self, encoding, spread, log_steps):
         x = torch.cat([encoding.view(-1, D_MODEL), spread.view(-1, 1), log_steps.view(-1, 1)], 1)
 
-        x = F.leaky_relu(self.fc1(x) + encoding)
-        x = F.leaky_relu(self.fc2(x) + x)
-        x = self.fc3(x)
+        x = self.initial_layer(x)
+        x = self.initial_bn(x)
+        x = F.leaky_relu(x)
+        for i in range(self.n_layers):
+            if i % 2 == 0:
+                if i == 0:
+                    res = encoding.view(-1, D_MODEL)
+                else:
+                    res = x
+                x = self.dropout(x)
+                x = self.layers[i](x)
+                x = self.bns[i](x)
+                x = self.dropout(x)
+                x = F.leaky_relu(x)
+            else:
+                x = self.layers[i](x)
+                x = self.bns[i](x)
+                x = x + res
+                x = F.leaky_relu(x)
 
+        x = self.final_layer(x)
         return x
 
 
@@ -577,10 +595,10 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 2
+        self.d_action = 10
         self.dropout = nn.Dropout(P_DROPOUT)
 
-        self.combined_initial = nn.Linear(D_MODEL + self.d_action, D_MODEL)
+        self.combined_initial = nn.Linear(D_MODEL, D_MODEL)
         self.combined_initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
         self.n_combined_layers = 2
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
@@ -589,7 +607,7 @@ class ActorCritic(nn.Module):
         self.n_actor_layers = 2
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_actor_layers)])
-        self.actor_out = nn.Linear(D_MODEL, 3)
+        self.actor_out = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
 
         self.n_critic_layers = 2
@@ -597,12 +615,9 @@ class ActorCritic(nn.Module):
         self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
 
-    def forward(self, market_encoding, proposed_actions, temp=1):
+    def forward(self, market_encoding, temp=1):
 
-        x = torch.cat([
-                    market_encoding.view(-1, D_MODEL),
-                    proposed_actions.view(-1, self.d_action) * 10
-                    ], 1)
+        x = market_encoding.view(-1, D_MODEL)
         x = self.combined_initial(x)
         x = self.combined_initial_bn(x)
         x = F.leaky_relu(x)
