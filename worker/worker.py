@@ -28,7 +28,6 @@ class Worker(object):
             self.market_encoder = LSTMCNNEncoder().cpu()
             self.encoder_to_others = EncoderToOthers().cpu()
             self.actor_critic = ActorCritic().cpu()
-            self.encoder_to_others = EncoderToOthers().cpu()
             try:
                 self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
                 self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
@@ -47,7 +46,6 @@ class Worker(object):
         self.server = redis.Redis("localhost")
         self.instrument = instrument
         self.granularity = granularity
-        self.zeus = Zeus(instrument, granularity)
 
         self.time_states = []
         self.percents_in = []
@@ -69,26 +67,28 @@ class Worker(object):
 
         self.test = test
         if self.test:
+            self.zeus = Zeus(instrument, granularity, margin=0.1)
             self.tradeable_percentage = 1
-            self.steps_before_trajectory = 1440 - self.trajectory_steps
+            self.n_steps_left = self.window + 1440
+            self.n_total_experiences = 0
             self.trade_percent = self.tradeable_percentage / 1000
 
             self.actor_temp = 1
             self.proposer_temps = {"w":1, "mu":1, "sigma":1}
             self.proposer_gate_temp = 1
         else:
+            self.zeus = Zeus(instrument, granularity, margin=0.1)
             self.tradeable_percentage = 0.01
-            self.steps_before_trajectory = 240
+            self.n_total_experiences = 100
+            self.n_steps_left = self.window + self.trajectory_steps * self.n_total_experiences
             self.trade_percent = self.tradeable_percentage / 1000
 
             actor_base_temp = float(self.server.get("actor_temp").decode("utf-8"))
             self.actor_temp = np.random.exponential(actor_base_temp / np.log(2))
 
-
-        self.n_steps_left = self.window + self.trajectory_steps + self.steps_before_trajectory
         self.i_step = 0
         self.steps_since_push = 0
-        self.steps_between_experiences = 0
+        self.steps_between_experiences = self.trajectory_steps
 
         self.prev_value = self.zeus.unrealized_balance()
 
@@ -101,6 +101,7 @@ class Worker(object):
             return
 
         if len(self.time_states) >= self.window:
+
             in_ = self.zeus.position_size()
             available_ = self.zeus.units_available()
             percent_in = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
@@ -118,43 +119,53 @@ class Worker(object):
             policy, value = self.actor_critic.forward(market_encoding, temp=self.actor_temp)
 
             if self.test:
-                action = torch.argmax(policy).item()
+                # action = torch.argmax(policy).item()
+                action = torch.multinomial(policy, 1).item()
+                # action = torch.multinomial(policy[0, :8], 1).item()
             else:
                 action = torch.multinomial(policy, 1).item()
+                # try:
+                #     action = torch.multinomial(policy[0, :8], 1).item()
+                # except Exception:
+                #     # action = torch.multinomial(policy, 1).item()
+                #     action = np.random.randint(0, 8)
 
             mu = policy[0, action].item()
 
             def place_action(desired_percent):
-                if desired_percent == 0 and percent_in != 0:
+                current_percent_in = percent_in * self.tradeable_percentage
+
+                if desired_percent == 0 and current_percent_in != 0:
                     self.zeus.close_units(self.zeus.position_size())
-                elif desired_percent > 0 and percent_in > 0:
-                    if desired_percent > percent_in:
+                elif desired_percent > 0 and current_percent_in > 0:
+                    if desired_percent > current_percent_in:
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
-                        self.zeus.place_trade(int(abs(desired_percent - percent_in) * total_tradeable), "Long")
+                        self.zeus.place_trade(int(abs(desired_percent - current_percent_in) * total_tradeable), "Long")
                     else:
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
-                        self.zeus.close_units(int(abs((desired_percent - percent_in)) * total_tradeable))
+                        self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-                elif desired_percent > 0 and percent_in <= 0:
+                elif desired_percent > 0 and current_percent_in <= 0:
                     self.zeus.close_units(self.zeus.position_size())
                     total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                     self.zeus.place_trade(int(abs(desired_percent) * total_tradeable), "Long")
 
-                elif desired_percent < 0 and percent_in > 0:
+                elif desired_percent < 0 and current_percent_in > 0:
+                    self.zeus.close_units(self.zeus.position_size())
                     total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                     self.zeus.place_trade(int(abs(desired_percent) * total_tradeable), "Short")
 
-                elif desired_percent < 0 and percent_in <= 0:
-                    if desired_percent <= percent_in:
+                elif desired_percent < 0 and current_percent_in <= 0:
+                    if desired_percent <= current_percent_in:
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
-                        self.zeus.place_trade(int(abs(desired_percent - percent_in) * total_tradeable), "Short")
+                        self.zeus.place_trade(int(abs(desired_percent - current_percent_in) * total_tradeable), "Short")
                     else:
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
-                        self.zeus.close_units(int(abs((desired_percent - percent_in)) * total_tradeable))
+                        self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
             action_amounts = {0:1, 1:3, 2:5, 3:10, 4:-1, 5:-3, 6:-5, 7:-10}
             if action in action_amounts:
-                desired_percent_in = np.clip(percent_in + self.trade_percent * action_amounts[action], -self.tradeable_percentage, self.tradeable_percentage)
+                desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
             elif action == 8:
                 place_action(0)
@@ -162,7 +173,7 @@ class Worker(object):
             new_val = self.zeus.unrealized_balance()
             self.total_actual_reward += new_val - self.prev_value
             reward = (new_val - self.prev_value) / (2000 * self.trade_percent)
-            reward *= 10
+            # reward *= 10
             self.prev_value = new_val
             # if self.n_steps_left % 10 == action:
             #     reward = 1
@@ -181,6 +192,7 @@ class Worker(object):
                 else:
                     reward_ema = 0
                     reward_emsd = 0
+
                 in_ = self.zeus.position_size()
                 available_ = self.zeus.units_available()
                 percent_in_ = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
@@ -193,16 +205,28 @@ class Worker(object):
                 \nvalue: {v} \
                 \nrewards: {r} \
                 \nreward_ema: {ema} \
-                \nreward_emsd: {emsd}\n".format(s=self.i_step,
+                \nreward_emsd: {emsd} \
+                \nbar close: {close} \
+                \ninstrument: {ins} \
+                \nstart: {start}\n".format(s=self.i_step,
                                         p_in=round(percent_in_, 8),
                                         a=action,
-                                        u_b=round(new_val, 2),
+                                        u_b=round(new_val, 5),
                                         p=[round(policy_, 5) for policy_ in policy[0].tolist()],
-                                        v=round(value.item(), 2),
-                                        r=round(self.total_actual_reward, 2),
-                                        ema=round(reward_ema, 2),
-                                        emsd=round(reward_emsd, 2)))
+                                        v=round(value.item(), 5),
+                                        r=round(self.total_actual_reward, 5),
+                                        ema=round(reward_ema, 5),
+                                        emsd=round(reward_emsd, 5),
+                                        close=bar.close,
+                                        ins=self.instrument,
+                                        start=self.start))
 
+                for inst in ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]:
+                    inst_ema = self.server.get("test_ema_" + inst)
+                    if inst_ema is not None:
+                        print("ema " + inst, inst_ema.decode("utf-8"))
+                        print("emsd " + inst, self.server.get("test_emsd_" + inst).decode("utf-8"))
+                        print()
 
             if not self.test:
                 reward_ema = self.server.get("reward_ema").decode("utf-8")
@@ -231,8 +255,7 @@ class Worker(object):
                 del self.actions[0]
                 del self.mus[0]
 
-            if (self.steps_since_push >= self.steps_between_experiences) and not self.test and len(self.time_states) == self.window + self.trajectory_steps:
-
+            if (self.steps_since_push == self.steps_between_experiences) and (not self.test) and len(self.time_states) == self.window + self.trajectory_steps:
                 experience = Experience(
                 time_states=self.time_states,
                 percents_in=self.percents_in,
@@ -253,7 +276,11 @@ class Worker(object):
                         self.server.lpush("experience", experience)
                 else:
                     self.server.lpush("experience", experience)
-                self.steps_since_push = 0
+                self.steps_since_push = 1
+
+                desired_percent_in = np.clip(np.random.normal(0, 0.1) * self.tradeable_percentage + percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                place_action(desired_percent_in)
+                self.prev_value = self.zeus.unrealized_balance()
             else:
                 self.steps_since_push += 1
 
@@ -276,13 +303,17 @@ class Worker(object):
             self.start += n_seconds
 
         print(("time: {time}, "
-                "total rewards (percent): {reward}, "
-                "actor temp: {actor_temp}, "
-                "steps: {steps} ").format(
+                "rewards: {reward} %, "
+                "temp: {actor_temp}, "
+                "n exp: {n_experiences}, "
+                "instr: {instrument}, "
+                "start: {start}").format(
                     time=round(time.time()-t0, 2),
                     reward=round(100 * self.total_actual_reward / (2000 * self.tradeable_percentage), 5),
                     actor_temp=round(self.actor_temp, 3),
-                    steps=self.steps_before_trajectory
+                    n_experiences=self.n_total_experiences,
+                    instrument=self.instrument,
+                    start=self.start
                 )
         )
 
@@ -298,6 +329,20 @@ class Worker(object):
                 delta = self.total_actual_reward - reward_ema
                 self.server.set("test_reward_ema", reward_ema + reward_tau * delta)
                 self.server.set("test_reward_emsd", math.sqrt((1 - reward_tau) * (reward_emsd**2 + reward_tau * (delta**2))))
+
+            instrument_tau = reward_tau * 4
+            instrument_ema = self.server.get("test_ema_" + self.instrument)
+            if instrument_ema == None:
+                self.server.set("test_ema_" + self.instrument, self.total_actual_reward)
+                self.server.set("test_emsd_" + self.instrument, 0)
+            else:
+                instrument_ema = float(instrument_ema.decode("utf-8"))
+                instrument_emsd = float(self.server.get("test_emsd_" + self.instrument).decode("utf-8"))
+                delta = self.total_actual_reward - instrument_ema
+                self.server.set("test_ema_" + self.instrument, instrument_ema + instrument_tau * delta)
+                self.server.set("test_emsd_" + self.instrument, math.sqrt((1 - instrument_tau) * (instrument_emsd**2 + instrument_tau * (delta**2))))
+
+
 
         return self.total_actual_reward
 

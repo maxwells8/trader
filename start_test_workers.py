@@ -20,18 +20,28 @@ if __name__ == "__main__":
     models_loc = dir_path + '/models/'
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    inst_i = 0
+
+    for inst in instruments:
+        server.set("test_ema_" + inst, 0)
+        server.set("test_emsd_" + inst, 0)
 
     reward_tau = 0.01
     server.set("test_reward_tau", reward_tau)
+    server.set("test_reward_ema", 0)
+    server.set("test_reward_emsd", 0)
 
     def start_process(name):
         name = "test" + name
         global n_times
-        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+        global inst_i
         start = np.random.randint(1136073600, 1548374400)
-        # instrument = "EUR_USD"
+        # start = 1546819200
         # start = np.random.randint(1546819200, 1546948800)
         # start = 1546948800
+        instrument = instruments[inst_i]
+        inst_i = (inst_i + 1) % len(instruments)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, True))
         process.start()
@@ -46,7 +56,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 120:
+            while process.is_alive() and time.time() - times[i] < 180:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -59,6 +69,7 @@ if __name__ == "__main__":
                     process.terminate()
                     print("joining process")
                     process.join(5)
+                    inst_i = (inst_i - 1) % len(instruments)
                 except WindowsError as e:
                     print("error terminating process:")
                     print(e)

@@ -14,24 +14,27 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 8
+    n_workers = 16
     import os
     dir_path = os.path.dirname(os.path.realpath(__file__))
     models_loc = dir_path + '/models/'
     server = redis.Redis("localhost")
     server.set("p_new_proposal", 1)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
+    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    inst_i = 0
 
     if server.get("reward_ema") == None:
         server.set("reward_ema", 0)
         server.set("reward_emsd", 0)
 
     def start_process(name, n):
-        instrument = np.random.choice(["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"])
+        global inst_i
         start = np.random.randint(1136073600, 1548374400)
-        # instrument = "EUR_USD"
-        # start = np.random.randint(1546819200, 1546948800)
+        # start = np.random.randint(1546819200, 1546819200 + 60 * 11)
         # start = 1546948800
+        instrument = instruments[inst_i]
+        inst_i = (inst_i + 1) % len(instruments)
 
         process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start))
         process.start()
@@ -47,7 +50,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 20:
+            while process.is_alive() and time.time() - times[i] < 90:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -58,13 +61,14 @@ if __name__ == "__main__":
                     print("terminating worker {i}".format(i=i))
                     process.terminate()
                     process.join()
+                    inst_i = (inst_i - 1) % len(instruments)
                 except WindowsError as e:
                     print("error terminating worker {i}".format(i=i))
                     print(e)
 
             started = False
             while not started:
-                if server.llen("experience") < 1024:
+                if server.llen("experience") < 8192:
                     processes[i] = start_process(str(i), i)
                     times[i] = time.time()
                     started = True

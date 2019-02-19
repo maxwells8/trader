@@ -11,8 +11,8 @@ server = redis.Redis("localhost")
 server.set("trajectory_steps", 10)
 server.set("gamma", 0.99)
 
-server.set("max_rho", 10)
-server.set("max_c", 1.25)
+server.set("max_rho", 1)
+server.set("max_c", 1)
 
 server.set("actor_temp_cooldown", 0.99999)
 server.set("min_proposed", 0.001)

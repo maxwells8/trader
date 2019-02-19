@@ -596,6 +596,7 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
 
         self.d_action = 10
+        self.d_action = 8
         self.dropout = nn.Dropout(P_DROPOUT)
 
         self.combined_initial = nn.Linear(D_MODEL, D_MODEL)

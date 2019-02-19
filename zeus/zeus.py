@@ -16,16 +16,21 @@ def slashescape(err):
 codecs.register_error('slashescape', slashescape)
 
 class Zeus:
-    def __init__(self, instrument, granularity, live=False):
+    def __init__(self, instrument, granularity, live=False, margin=None):
         self.instrument = instrument;
         self.granularity = granularity;
 
         self.lib = windll.LoadLibrary('target\debug\zeus.dll')
 
         if live == False:
-            self.lib.create_session.argtypes = [POINTER(RawString), c_char, c_int]
-            self.lib.create_session.restype = c_void_p
-            self.sess = self.lib.create_session(as_raw_str(instrument), c_char(bytes(granularity[0], 'utf-8')), int(granularity[1:]))
+            if margin is not None:
+                self.lib.create_dev_session.argtypes = [POINTER(RawString), c_char, c_int, c_double]
+                self.lib.create_dev_session.restype = c_void_p
+                self.sess = self.lib.create_dev_session(as_raw_str(instrument), c_char(bytes(granularity[0], 'utf-8')), int(granularity[1:]), c_double(margin))
+            else:
+                self.lib.create_session.argtypes = [POINTER(RawString), c_char, c_int]
+                self.lib.create_session.restype = c_void_p
+                self.sess = self.lib.create_session(as_raw_str(instrument), c_char(bytes(granularity[0], 'utf-8')), int(granularity[1:]))
         else:
             self.lib.create_live_session.argtypes = [POINTER(RawString), c_char, c_int]
             self.lib.create_live_session.restype = c_void_p

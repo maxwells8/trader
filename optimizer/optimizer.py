@@ -164,7 +164,6 @@ class Optimizer(object):
             reward_ema = float(self.server.get("reward_ema").decode("utf-8"))
             reward_emsd = float(self.server.get("reward_emsd").decode("utf-8"))
 
-            t_t = 0
             critic_loss = torch.Tensor([0]).cuda()
             actor_v_loss = torch.Tensor([0]).cuda()
             actor_entropy_loss = torch.Tensor([0]).cuda()
