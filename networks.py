@@ -272,6 +272,29 @@ class LSTMCNNEncoder(nn.Module):
         return x
 
 
+class LSTMEncoder(nn.Module):
+    def __init__(self):
+        super(FCEncoder, self).__init__()
+
+        self.n_lstm_layers = 2
+        self.lstm = nn.LSTM(input_size=D_BAR,
+                            hidden_size=D_MODEL,
+                            num_layers=self.n_lstm_layers,
+                            batch_first=True,
+                            dropout=P_DROPOUT)
+
+    def forward(self, market_values):
+        time_states = []
+        for time_state in market_values:
+            time_states.append(time_state.view(-1, 1, D_BAR))
+
+        # concatting such that the dim is (batch_size, WINDOW, D_BAR)
+        time_states = torch.cat(time_states, dim=1)
+        x, _ = self.lstm(time_states)
+
+        return x
+
+
 class MarketEncoder(nn.Module):
     """
     DEPRECATED

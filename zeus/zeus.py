@@ -65,6 +65,8 @@ class Zeus:
         self.lib.position_size.restype = c_void_p
         self.lib.units_available.argtypes = [c_void_p, POINTER(c_uint)]
         self.lib.units_available.restype = c_void_p
+        self.lib.stats.argtypes = [c_void_p]
+        self.lib.stats.restype = c_void_p
         # TODO self.lib.unrealized_trade_pl.restype = c_void_p
 
         #  Trading
@@ -77,6 +79,9 @@ class Zeus:
 
         # self.lib.test.argtypes = [c_void_p]
         # self.lib.test.restype = None
+
+    def stats(self):
+        self.sess = self.lib.stats(self.sess)
 
     def _get_value(self, func):
         temp = c_double(0.0)

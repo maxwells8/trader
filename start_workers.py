@@ -22,6 +22,7 @@ if __name__ == "__main__":
     server.set("p_new_proposal", 1)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    instruments = ["EUR_USD"]
     inst_i = 0
 
     if server.get("reward_ema") == None:

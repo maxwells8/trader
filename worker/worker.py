@@ -278,7 +278,9 @@ class Worker(object):
                     self.server.lpush("experience", experience)
                 self.steps_since_push = 1
 
-                desired_percent_in = np.clip(np.random.normal(0, 0.1) * self.tradeable_percentage + percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                p = np.random.rand()
+                desired_percent_in = np.random.normal(0, 0.25) * self.tradeable_percentage * p + np.random.normal(percent_in, 0.1) * (1 - p)
+                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
                 self.prev_value = self.zeus.unrealized_balance()
             else:

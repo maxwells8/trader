@@ -25,13 +25,13 @@ class Worker(object):
     def __init__(self, instrument, granularity, models_loc):
 
         while True:
-            self.market_encoder = LSTMCNNEncoder().cpu()
-            self.actor_critic = ActorCritic().cpu()
-            self.encoder_to_others = EncoderToOthers().cpu()
+            self.market_encoder = LSTMCNNEncoder()
+            self.actor_critic = ActorCritic()
+            self.encoder_to_others = EncoderToOthers()
             try:
-                self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
-                self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
-                self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt'))
+                self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cpu'))
+                self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cpu'))
+                self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cpu'))
                 self.market_encoder = self.market_encoder.cpu()
                 self.encoder_to_others = self.encoder_to_others.cpu()
                 self.actor_critic = self.actor_critic.cpu()
@@ -65,10 +65,10 @@ class Worker(object):
 
         if len(self.time_states) == self.window + 1:
             del self.time_states[0]
-        print(len(self.time_states))
+        else:
+            print("number of bars:", len(self.time_states))
 
         if len(self.time_states) == self.window and self.live:
-
             in_ = self.zeus.position_size()
             available_ = self.zeus.units_available()
             percent_in = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
@@ -119,10 +119,17 @@ class Worker(object):
 
             action_amounts = {0:1, 1:3, 2:5, 3:10, 4:-1, 5:-3, 6:-5, 7:-10}
             if action in action_amounts:
+                print("purchasing:", action_amounts[action])
                 desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
             elif action == 8:
+                print("closing all")
                 place_action(0)
+            else:
+                print("holding")
+            print("percent in:", percent_in)
+            print("probabilities:", policy.tolist())
+            print()
 
         torch.cuda.empty_cache()
 
@@ -131,8 +138,10 @@ class Worker(object):
         self.encoder_to_others.eval()
         self.actor_critic.eval()
 
+        print("fetching last", self.window, "bars...")
         self.zeus.stream_bars(self.window, self.add_bar)
 
+        print("going live...")
         self.live = True
         self.zeus = Zeus(self.instrument, self.granularity, live=True)
         self.zeus.stream_live(self.on_bar)
