@@ -15,6 +15,8 @@ import msgpack
 import math
 from zeus.zeus import Zeus
 
+assert False
+
 # np.random.seed(0)
 # torch.manual_seed(0)
 torch.set_default_tensor_type(torch.FloatTensor)
@@ -65,8 +67,6 @@ class Worker(object):
 
         if len(self.time_states) == self.window + 1:
             del self.time_states[0]
-        else:
-            print("number of bars:", len(self.time_states))
 
         if len(self.time_states) == self.window and self.live:
             in_ = self.zeus.position_size()
@@ -84,7 +84,8 @@ class Worker(object):
 
             policy, value = self.actor_critic.forward(market_encoding)
 
-            action = torch.argmax(policy).item()
+            # action = torch.argmax(policy).item()
+            action = torch.multinomial(policy, 1).item()
 
             def place_action(desired_percent):
                 current_percent_in = percent_in * self.tradeable_percentage
@@ -117,16 +118,12 @@ class Worker(object):
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-            action_amounts = {0:1, 1:3, 2:5, 3:10, 4:-1, 5:-3, 6:-5, 7:-10}
+            action_amounts = {0:-10, 1:-5, 2:-3, 3:-1, 4:0, 5:1, 6:3, 7:5, 8:10}
             if action in action_amounts:
                 print("purchasing:", action_amounts[action])
                 desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
-            elif action == 8:
-                print("closing all")
-                place_action(0)
-            else:
-                print("holding")
+
             print("percent in:", percent_in)
             print("probabilities:", policy.tolist())
             print()
@@ -144,4 +141,4 @@ class Worker(object):
         print("going live...")
         self.live = True
         self.zeus = Zeus(self.instrument, self.granularity, live=True)
-        self.zeus.stream_live(self.on_bar)
+        self.zeus.stream_live(self.add_bar)

@@ -163,12 +163,10 @@ class Worker(object):
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-            action_amounts = {0:1, 1:3, 2:5, 3:10, 4:-1, 5:-3, 6:-5, 7:-10}
+            action_amounts = {0:-10, 1:-5, 2:-3, 3:-1, 4:0, 5:1, 6:3, 7:5, 8:10}
             if action in action_amounts:
                 desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
-            elif action == 8:
-                place_action(0)
 
             new_val = self.zeus.unrealized_balance()
             self.total_actual_reward += new_val - self.prev_value
