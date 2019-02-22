@@ -120,13 +120,15 @@ class Worker(object):
 
             action_amounts = {0:-10, 1:-5, 2:-3, 3:-1, 4:0, 5:1, 6:3, 7:5, 8:10}
             if action in action_amounts:
-                print("purchasing:", action_amounts[action])
                 desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
 
-            print("percent in:", percent_in)
-            print("probabilities:", policy.tolist())
-            print()
+            print("instrument", self.instrument)
+            print("purchased:", action_amounts[action])
+            print("percent in:", round(percent_in, 5))
+            for i, policy_ in enumerate(policy.tolist()[0]):
+                print("probability {i}: {p}".format(i=i, p=round(policy_, 5)))
+            print("-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-")
 
         torch.cuda.empty_cache()
 
