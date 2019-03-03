@@ -22,11 +22,10 @@ server.set("actor_v_weight", 1)
 server.set("actor_entropy_weight", 0.001)
 server.set("weight_penalty", 0.0001)
 
-# server.set("learning_rate", 0.0001)
-server.set("learning_rate", 0.00001)
+server.set("learning_rate", 0.0001)
 
-server.set("prioritized_batch_size", 32)
 server.set("queued_batch_size", 64)
+server.set("replay_buffer_size", 10000)
 
 server.set("reward_tau", 1e-6)
 

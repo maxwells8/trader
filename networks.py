@@ -8,9 +8,9 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 256
-WINDOW = 180
-P_DROPOUT = 0.25
+D_MODEL = 128
+WINDOW = 240
+P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -146,11 +146,8 @@ class CNNEncoder(nn.Module):
         self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
 
     def forward(self, market_values):
-        time_states = []
-        for time_state in market_values:
-            time_states.append(time_state.view(-1, D_BAR, 1))
-
-        time_states = torch.cat(time_states, dim=2)
+        time_states = market_values.transpose(0, 1).transpose(1, 2)
+        batch_size = time_states.size()[0]
 
         x = self.conv1(time_states)
         x = self.conv1_bn(x)
@@ -172,7 +169,7 @@ class CNNEncoder(nn.Module):
         x = self.pool(x)
         x = F.leaky_relu(x)
 
-        x = x.squeeze().view(-1, self.L_in * self.n_channels[-1])
+        x = x.view(batch_size, -1)
 
         for i in range(self.n_fc_layers):
             x = self.fc_layers[i](x)
@@ -230,10 +227,10 @@ class LSTMCNNEncoder(nn.Module):
             self.L_in = math.floor((self.L_in - self.pool_kernel_size) / self.pool_kernel_size + 1)
         self.L_in = int(self.L_in)
 
-        self.n_fc_layers = 1
         self.conv_out_dim = self.L_in * self.n_channels[-1]
         begin_dim = self.conv_out_dim
         end_dim = D_MODEL
+        self.n_fc_layers = 1
         # scale down the layer size linearly from begin_dim to end_dim
         self.fc_layers = nn.ModuleList([nn.Linear(int((end_dim - begin_dim) * n / self.n_fc_layers + begin_dim), int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim)) for n in range(self.n_fc_layers)])
         self.fc_bn = nn.ModuleList([nn.BatchNorm1d(int((end_dim - begin_dim) * (n + 1) / self.n_fc_layers + begin_dim), eps=1e-9) for n in range(self.n_fc_layers)])
@@ -274,7 +271,7 @@ class LSTMCNNEncoder(nn.Module):
 
 class LSTMEncoder(nn.Module):
     def __init__(self):
-        super(FCEncoder, self).__init__()
+        super(LSTMEncoder, self).__init__()
 
         self.n_lstm_layers = 2
         self.lstm = nn.LSTM(input_size=D_BAR,
@@ -284,15 +281,9 @@ class LSTMEncoder(nn.Module):
                             dropout=P_DROPOUT)
 
     def forward(self, market_values):
-        time_states = []
-        for time_state in market_values:
-            time_states.append(time_state.view(-1, 1, D_BAR))
 
-        # concatting such that the dim is (batch_size, WINDOW, D_BAR)
-        time_states = torch.cat(time_states, dim=1)
-        x, _ = self.lstm(time_states)
-
-        return x
+        x, _ = self.lstm(market_values)
+        return x[-1]
 
 
 class MarketEncoder(nn.Module):
@@ -347,29 +338,25 @@ class AttentionMarketEncoder(nn.Module):
         self.WVs = nn.ModuleList([nn.Linear(D_MODEL, self.d_v, bias=False) for _ in range(self.h * len(self.Ns))])
         self.WOs = nn.ModuleList(nn.Linear(self.h * self.d_v, D_MODEL, bias=False) for _ in range(len(self.Ns)))
 
-        self.a_gain_ = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
-        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.a_gain = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(len(self.Ns))])
+        self.a_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(len(self.Ns))])
 
-        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(np.sum(self.Ns))])
-        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(np.sum(self.Ns))])
-        self.fc_out_gain_ = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
-        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(np.sum(self.Ns))])
+        self.fc_out1 = nn.ModuleList([nn.Linear(D_MODEL, self.fc_out_middle_size) for _ in range(len(self.Ns))])
+        self.fc_out2 = nn.ModuleList([nn.Linear(self.fc_out_middle_size, D_MODEL) for _ in range(len(self.Ns))])
+        self.fc_out_gain_ = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(len(self.Ns))])
+        self.fc_out_bias = nn.ParameterList([nn.Parameter(torch.zeros(D_MODEL)) for _ in range(len(self.Ns))])
 
-        self.fc_final = nn.Linear(WINDOW, 1)
+        self.fc_final1 = nn.Linear(D_MODEL, int(D_MODEL / 16))
+        self.fc_final2 = nn.Linear(WINDOW * int(D_MODEL / 16), D_MODEL)
+        self.bn_final2 = nn.BatchNorm1d(D_MODEL)
 
     def forward(self, market_values):
-        time_states = []
-        for i, time_state in enumerate(market_values):
-            time_tag = torch.Tensor([(i - WINDOW / 2) / (WINDOW / 2)], device=time_state.device).repeat(time_state.size()[0]).view(-1, 1)
-            # time_tag.device = time_state.device
-            if time_state.device == torch.device('cuda:' + str(torch.cuda.current_device())):
-                time_tag = time_tag.cuda()
+        batch_size = market_values[0].size()[0]
+        device = market_values[0].device
 
-            time_state_ = torch.cat([time_state, time_tag], dim=1).view(1, -1, D_BAR+1)
-            time_state_ = self.fc_bar(time_state_)
-            time_states.append(time_state_)
-
-        inputs = torch.cat(time_states, dim=0)
+        time_tag = torch.arange(-1, 1, 2 / WINDOW, device=device).repeat(batch_size, 1).transpose(0, 1).view(WINDOW, batch_size, 1)
+        inputs = torch.cat([market_values, time_tag], dim=2).transpose(0, 1)
+        inputs = self.fc_bar(inputs)
 
         for i_N, N in enumerate(self.Ns):
             n_N = int(np.sum(self.Ns[:i_N]))
@@ -379,34 +366,35 @@ class AttentionMarketEncoder(nn.Module):
                     Q = self.WQs[i_N*self.h + i](inputs)
                     K = self.WKs[i_N*self.h + i](inputs)
                     V = self.WVs[i_N*self.h + i](inputs)
-                    # print(Q, K, V)
 
                     saliencies = torch.bmm(Q, K.transpose(1, 2))
                     weights = F.softmax(saliencies / math.sqrt(self.d_k), dim=2)
-                    # print(N, j, weights.max(dim=2)[0].mean())
                     head = torch.bmm(weights, V)
                     heads.append(head)
 
                 heads = torch.cat(heads, dim=2)
                 out = self.WOs[i_N](heads) + inputs
-                out_mean = out.mean(dim=2).view(WINDOW, -1, 1)
-                out_std = out.std(dim=2).view(WINDOW, -1, 1)
+                out_mean = out.mean(dim=2).view(batch_size, WINDOW, 1)
+                out_std = out.std(dim=2).view(batch_size, WINDOW, 1)
                 out = (out - out_mean) / (out_std + 1e-9)
-                out = out * (self.a_gain_[n_N + j] + 1) + self.a_bias[n_N + j]
+                out_ = out * (self.a_gain[i_N] + 1) + self.a_bias[i_N]
 
-                out = F.leaky_relu(self.fc_out1[n_N + j](out))
-                out = self.fc_out2[n_N + j](out) + inputs
-                out_mean = out.mean(dim=2).view(WINDOW, -1, 1)
-                out_std = out.std(dim=2).view(WINDOW, -1, 1)
+                out = F.leaky_relu(self.fc_out1[i_N](out_))
+                out = self.fc_out2[i_N](out) + out_
+                out_mean = out.mean(dim=2).view(batch_size, WINDOW, 1)
+                out_std = out.std(dim=2).view(batch_size, WINDOW, 1)
                 inputs = (out - out_mean) / (out_std + 1e-9)
-                inputs = inputs * (self.fc_out_gain_[n_N + j] + 1) + self.fc_out_bias[n_N + j]
+                inputs = inputs * (self.fc_out_gain_[i_N] + 1) + self.fc_out_bias[i_N]
 
-        outputs = F.leaky_relu(self.fc_final(inputs.transpose(0, 2))).view(-1, D_MODEL)
-        return outputs
+        outputs = inputs
+        outputs = self.fc_final1(outputs)
+        outputs = F.leaky_relu(outputs)
+        outputs = outputs.view(batch_size, -1)
+        outputs = self.fc_final2(outputs)
+        outputs = self.bn_final2(outputs)
+        outputs = F.leaky_relu(outputs)
+        return outputs.view(batch_size, D_MODEL)
 
-    def layer_norm(self, layer, gain, bias):
-
-        pass
 
 class Decoder(nn.Module):
 
@@ -618,22 +606,22 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 9
+        self.d_action = 11
         self.dropout = nn.Dropout(P_DROPOUT)
 
         self.combined_initial = nn.Linear(D_MODEL, D_MODEL)
         self.combined_initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
-        self.n_combined_layers = 2
+        self.n_combined_layers = 8
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_combined_layers)])
 
-        self.n_actor_layers = 2
+        self.n_actor_layers = 8
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
 
-        self.n_critic_layers = 2
+        self.n_critic_layers = 8
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
         self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
@@ -706,7 +694,7 @@ class EncoderToOthers(nn.Module):
         self.initial_layer = nn.Linear(D_MODEL + 2, D_MODEL)
         self.initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
 
-        self.n_layers = 2
+        self.n_layers = 0
         self.layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
         self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_layers)])
         self.dropout = nn.Dropout(P_DROPOUT)

@@ -27,7 +27,7 @@ class Worker(object):
     def __init__(self, instrument, granularity, models_loc):
 
         while True:
-            self.market_encoder = LSTMCNNEncoder()
+            self.market_encoder = CNNEncoder()
             self.actor_critic = ActorCritic()
             self.encoder_to_others = EncoderToOthers()
             try:
@@ -118,13 +118,14 @@ class Worker(object):
                         total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-            action_amounts = {0:-10, 1:-5, 2:-3, 3:-1, 4:0, 5:1, 6:3, 7:5, 8:10}
-            if action in action_amounts:
-                desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
+            change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
+            if action in change_amounts:
+                desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
+                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
 
             print("instrument", self.instrument)
-            print("purchased:", action_amounts[action])
+            print("purchased:", change_amounts[action])
             print("percent in:", round(percent_in, 5))
             for i, policy_ in enumerate(policy.tolist()[0]):
                 print("probability {i}: {p}".format(i=i, p=round(policy_, 5)))

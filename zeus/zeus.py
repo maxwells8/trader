@@ -70,10 +70,8 @@ class Zeus:
         # TODO self.lib.unrealized_trade_pl.restype = c_void_p
 
         #  Trading
-        self.lib.place_trade.argtypes = [c_void_p, POINTER(TradeRequest), POINTER(RawString)]
+        self.lib.place_trade.argtypes = [c_void_p, POINTER(TradeRequest)]
         self.lib.place_trade.restype = c_void_p
-        self.lib.close_trade.argtypes = [c_void_p, POINTER(RawString), POINTER(c_double)]
-        self.lib.close_trade.restype = c_void_p
         self.lib.close_units.argtypes = [c_void_p, c_uint, POINTER(c_double)]
         self.lib.close_units.restype = c_void_p
 
@@ -156,9 +154,7 @@ class Zeus:
 
     def place_trade(self, quantity, pos):
         req = TradeRequest(as_raw_str(self.instrument), quantity, as_raw_str(pos))
-        id = as_raw_str("")
-        self.sess = self.lib.place_trade(self.sess, byref(req), byref(id))
-        return id.raw.decode('utf-8', 'ignore')[:id.len]
+        self.sess = self.lib.place_trade(self.sess, byref(req))
 
     def close_trade(self, id):
         id = as_raw_str(id)

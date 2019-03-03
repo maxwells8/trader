@@ -20,7 +20,8 @@ if __name__ == "__main__":
     models_loc = dir_path + '/models/'
     server = redis.Redis("localhost")
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
-    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    instruments = ["EUR_USD"]
     inst_i = 0
 
     for inst in instruments:
@@ -38,8 +39,6 @@ if __name__ == "__main__":
         global inst_i
         start = np.random.randint(1136073600, 1548374400)
         # start = 1546819200
-        # start = np.random.randint(1546819200, 1546948800)
-        # start = 1546948800
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 
@@ -56,7 +55,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 180:
+            while process.is_alive() and time.time() - times[i] < 300:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

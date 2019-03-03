@@ -67,7 +67,6 @@ class Optimizer(object):
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
 
         self.queued_batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
-        self.prioritized_batch_size = int(self.server.get("prioritized_batch_size").decode("utf-8"))
 
         self.queued_experience = []
         self.prioritized_experience = []
@@ -136,12 +135,21 @@ class Optimizer(object):
                     self.queued_experience.append(experience)
                     n_experiences += 1
 
+            # get some experiences from the replay buffer
+            buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
+            if buffer_size > len(self.queued_experience):
+                locs = np.random.choice(np.arange(0, buffer_size, 1), len(self.queued_experience))
+                for loc in locs:
+                    experience = self.server.lindex("replay_buffer", int(loc))
+                    experience = msgpack.unpackb(experience, raw=False)
+                    self.prioritized_experience.append(experience)
+
             experiences = self.queued_experience + self.prioritized_experience
             batch_size = len(experiences)
 
-            # if step in [50000]:
-            #     for param_group in self.optimizer.param_groups:
-            #         param_group['lr'] = param_group['lr'] / 10
+            if step in [100000]:
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = param_group['lr'] / 10
 
             # start grads anew
             self.optimizer.zero_grad()
@@ -173,8 +181,8 @@ class Optimizer(object):
             # proposed_entropy_loss = torch.Tensor([0]).cuda()
 
             time_states_ = torch.cat(time_states[-window:], dim=1).detach().cuda()
-            mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
-            std = time_states_[:, :, :4].contiguous().view(batch_size, -1).std(1).view(batch_size, 1, 1)
+            mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
+            std = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).std(1).view(batch_size, 1, 1)
             time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
             spread_ = torch.Tensor(spread[-1]).view(-1, 1, 1).cuda() / std
             time_states_ = time_states_.transpose(0, 1)
@@ -187,8 +195,8 @@ class Optimizer(object):
             v_trace = value.detach()
             for i in range(1, self.trajectory_steps):
                 time_states_ = torch.cat(time_states[-window-i:-i], dim=1).cuda()
-                mean = time_states_[:, :, :4].contiguous().view(batch_size, -1).mean(1).view(batch_size, 1, 1)
-                std = time_states_[:, :, :4].contiguous().view(batch_size, -1).std(1).view(batch_size, 1, 1)
+                mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
+                std = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).std(1).view(batch_size, 1, 1)
                 time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
                 spread_ = torch.Tensor(spread[-i-1]).view(-1, 1, 1).cuda() / std
                 time_states_ = time_states_.transpose(0, 1)
@@ -203,13 +211,13 @@ class Optimizer(object):
                 # queried_pi = self.PN.p(queried.detach(), p_x_w, p_x_mu, p_x_sigma)
                 # queried_pi_combined = queried_pi.prod(1).view(-1, 1)
 
-                pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(-1, 1))
-                mu_ = torch.Tensor(mu[-i-1]).cuda().view(-1, 1)
+                pi_ = policy.gather(1, torch.Tensor(place_action[-i-1]).cuda().long().view(batch_size, 1))
+                mu_ = torch.Tensor(mu[-i-1]).cuda().view(batch_size, 1)
                 # queried_mu = torch.Tensor(queried_mus[-i-1]).cuda().view(-1, 1)
                 # switch_pi = p_switch.gather(1, torch.Tensor(switch_action[-i-1]).cuda().long().view(-1, 1))
                 # switch_mu = torch.Tensor(switch_mus[-i-1]).cuda().view(-1, 1)
 
-                r = torch.Tensor(reward[-i-1]).cuda().view(-1, 1)
+                r = torch.Tensor(reward[-i-1]).cuda().view(batch_size, 1)
 
                 if i == self.trajectory_steps - 1:
                     # rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9) *
@@ -316,29 +324,20 @@ class Optimizer(object):
                 except Exception:
                     print("failed to save")
 
-            dif = value.detach() - v_trace.detach()
-            if batch_size > len(self.queued_experience):
-                smallest, i_smallest = torch.min(torch.abs(dif[len(self.queued_experience):]), dim=0)
-            for i, experience in enumerate(self.queued_experience):
-                if len(self.prioritized_experience) == self.prioritized_batch_size and self.prioritized_batch_size != 0 and len(self.queued_experience) != batch_size:
-                    if torch.abs(dif[i]) > smallest:
-                        self.prioritized_experience[i_smallest] = experience
-                        dif[len(self.queued_experience) + i_smallest] = torch.abs(dif[i])
-                        smallest, i_smallest = torch.min(torch.abs(dif[len(self.queued_experience):]), dim=0)
-                elif len(self.prioritized_experience) < self.prioritized_batch_size:
-                    self.prioritized_experience.append(experience)
-
             self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** step
             self.server.set("actor_temp", self.actor_temp)
             self.queued_experience = []
-            torch.cuda.empty_cache()
+            self.prioritized_experience = []
+            # torch.cuda.empty_cache()
 
             print('-----------------------------------------------------------')
             print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=step, t=round(time.time()-t0, 5)))
             print()
 
-            for i in range(policy.size()[1]):
-                print("policy[{i}] min mean std max:\n".format(i=i), round(policy[:, i].cpu().detach().min().item(), 7), round(policy[:, i].cpu().detach().mean().item(), 7), round(policy[:, i].cpu().detach().std().item(), 7), round(policy[:, i].cpu().detach().max().item(), 7))
+            # for i in range(policy.size()[1]):
+            #     print("policy[{i}] min mean std max:\n".format(i=i), round(policy[:, i].cpu().detach().min().item(), 7), round(policy[:, i].cpu().detach().mean().item(), 7), round(policy[:, i].cpu().detach().std().item(), 7), round(policy[:, i].cpu().detach().max().item(), 7))
+            # print()
+            print("policy means:", policy.cpu().detach().mean(dim=0))
             print()
 
             # print("proposed[0] min mean std max:\n", round(proposed[:, 0].cpu().detach().min().item(), 7), round(proposed[:, 0].cpu().detach().mean().item(), 7), round(proposed[:, 0].cpu().detach().std().item(), 7), round(proposed[:, 0].cpu().detach().max().item(), 7))

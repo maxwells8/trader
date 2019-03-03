@@ -17,28 +17,46 @@ from zeus.zeus import Zeus
 
 # np.random.seed(0)
 # torch.manual_seed(0)
-torch.set_default_tensor_type(torch.FloatTensor)
 torch.set_num_threads(1)
 
 class Worker(object):
 
     def __init__(self, name, instrument, granularity, models_loc, start, test=False):
 
+        if not test:
+            torch.set_default_tensor_type(torch.FloatTensor)
+        else:
+            torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
         while True:
-            self.market_encoder = LSTMCNNEncoder().cpu()
-            self.encoder_to_others = EncoderToOthers().cpu()
-            self.actor_critic = ActorCritic().cpu()
-            try:
-                self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt'))
-                self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt'))
-                self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt'))
-                self.market_encoder = self.market_encoder.cpu()
-                self.encoder_to_others = self.encoder_to_others.cpu()
-                self.actor_critic = self.actor_critic.cpu()
-                break
-            except Exception:
-                print("Failed to load models")
-                time.sleep(0.1)
+            if not test:
+                self.market_encoder = LSTMCNNEncoder().cpu()
+                self.encoder_to_others = EncoderToOthers().cpu()
+                self.actor_critic = ActorCritic().cpu()
+                try:
+                    self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cpu'))
+                    self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cpu'))
+                    self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cpu'))
+                    break
+                except Exception:
+                    print("Failed to load models")
+                    time.sleep(0.1)
+            else:
+                self.market_encoder = LSTMCNNEncoder().cuda()
+                self.encoder_to_others = EncoderToOthers().cuda()
+                self.actor_critic = ActorCritic().cuda()
+                try:
+                    self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cuda'))
+                    self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cuda'))
+                    self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cuda'))
+                    break
+                except Exception:
+                    print("Failed to load models")
+                    time.sleep(0.1)
+
+        self.market_encoder.eval()
+        self.encoder_to_others.eval()
+        self.actor_critic.eval()
 
         self.name = name
         self.models_loc = models_loc
@@ -64,12 +82,11 @@ class Worker(object):
 
         self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
 
-
         self.test = test
         if self.test:
-            self.zeus = Zeus(instrument, granularity, margin=0.1)
+            self.zeus = Zeus(instrument, granularity, margin=1)
             self.tradeable_percentage = 1
-            self.n_steps_left = self.window + 1440
+            self.n_steps_left = self.window + 7200
             self.n_total_experiences = 0
             self.trade_percent = self.tradeable_percentage / 1000
 
@@ -78,8 +95,8 @@ class Worker(object):
             self.proposer_gate_temp = 1
         else:
             self.zeus = Zeus(instrument, granularity, margin=0.1)
-            self.tradeable_percentage = 0.01
-            self.n_total_experiences = 100
+            self.tradeable_percentage = 1
+            self.n_total_experiences = 25
             self.n_steps_left = self.window + self.trajectory_steps * self.n_total_experiences
             self.trade_percent = self.tradeable_percentage / 1000
 
@@ -106,17 +123,16 @@ class Worker(object):
             available_ = self.zeus.units_available()
             percent_in = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
 
-            input_time_states = torch.Tensor(self.time_states[-self.window:]).view(self.window, 1, networks.D_BAR).cpu()
+            input_time_states = torch.Tensor(self.time_states[-self.window:]).view(self.window, 1, networks.D_BAR)
             mean = input_time_states[:, 0, :4].mean()
             std = input_time_states[:, 0, :4].std()
             input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
             assert torch.isnan(input_time_states).sum() == 0
-            spread_normalized = bar.spread / std
+            spread_ = bar.spread / std
 
-            market_encoding = self.market_encoder.forward(input_time_states)
-            market_encoding = self.encoder_to_others.forward(market_encoding, torch.Tensor([spread_normalized]), torch.Tensor([percent_in]))
-
-            policy, value = self.actor_critic.forward(market_encoding, temp=self.actor_temp)
+            market_encoding = self.market_encoder(input_time_states)
+            market_encoding = self.encoder_to_others(market_encoding, torch.Tensor([spread_]), torch.Tensor([percent_in]))
+            policy, value = self.actor_critic(market_encoding, temp=self.actor_temp)
 
             if self.test:
                 # action = torch.argmax(policy).item()
@@ -138,11 +154,10 @@ class Worker(object):
                 if desired_percent == 0 and current_percent_in != 0:
                     self.zeus.close_units(self.zeus.position_size())
                 elif desired_percent > 0 and current_percent_in > 0:
+                    total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                     if desired_percent > current_percent_in:
-                        total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.place_trade(int(abs(desired_percent - current_percent_in) * total_tradeable), "Long")
                     else:
-                        total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
                 elif desired_percent > 0 and current_percent_in <= 0:
@@ -156,22 +171,22 @@ class Worker(object):
                     self.zeus.place_trade(int(abs(desired_percent) * total_tradeable), "Short")
 
                 elif desired_percent < 0 and current_percent_in <= 0:
+                    total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                     if desired_percent <= current_percent_in:
-                        total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.place_trade(int(abs(desired_percent - current_percent_in) * total_tradeable), "Short")
                     else:
-                        total_tradeable = abs(self.zeus.position_size()) + self.zeus.units_available()
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-            action_amounts = {0:-10, 1:-5, 2:-3, 3:-1, 4:0, 5:1, 6:3, 7:5, 8:10}
-            if action in action_amounts:
-                desired_percent_in = np.clip((percent_in * self.tradeable_percentage) + (self.trade_percent * action_amounts[action]), -self.tradeable_percentage, self.tradeable_percentage)
+            change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
+            if action in change_amounts:
+                desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
+                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
 
             new_val = self.zeus.unrealized_balance()
             self.total_actual_reward += new_val - self.prev_value
             reward = (new_val - self.prev_value) / (2000 * self.trade_percent)
-            # reward *= 10
+            reward *= 10
             self.prev_value = new_val
             # if self.n_steps_left % 10 == action:
             #     reward = 1
@@ -219,12 +234,23 @@ class Worker(object):
                                         ins=self.instrument,
                                         start=self.start))
 
-                for inst in ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]:
+                # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+                instruments = ["EUR_USD"]
+                for inst in instruments:
                     inst_ema = self.server.get("test_ema_" + inst)
                     if inst_ema is not None:
                         print("ema " + inst, inst_ema.decode("utf-8"))
                         print("emsd " + inst, self.server.get("test_emsd_" + inst).decode("utf-8"))
                         print()
+
+                if self.i_step % 100 == 0:
+                    try:
+                        self.market_encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt', map_location='cuda'))
+                        self.encoder_to_others.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt', map_location='cuda'))
+                        self.actor_critic.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt', map_location='cuda'))
+                    except Exception as e:
+                        print("Failed to load models")
+
 
             if not self.test:
                 reward_ema = self.server.get("reward_ema").decode("utf-8")
@@ -264,6 +290,7 @@ class Worker(object):
                 )
 
                 experience = msgpack.packb(experience, use_bin_type=True)
+                self.add_to_replay_buffer(experience)
                 n_experiences = self.server.llen("experience")
                 if n_experiences > 0:
                     try:
@@ -276,29 +303,32 @@ class Worker(object):
                     self.server.lpush("experience", experience)
                 self.steps_since_push = 1
 
-                p = np.random.rand()
-                desired_percent_in = np.random.normal(0, 0.25) * self.tradeable_percentage * p + np.random.normal(percent_in, 0.1) * (1 - p)
-                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
-                place_action(desired_percent_in)
-                self.prev_value = self.zeus.unrealized_balance()
+                # p = np.random.rand()
+                # desired_percent_in = np.random.normal(0, 0.5) * p + np.random.normal(percent_in, 0.1) * (1 - p)
+                # desired_percent_in = np.random.normal(0, 1/3)
+                # desired_percent_in = np.random.normal(percent_in, 0.1)
+                # desired_percent_in *= self.tradeable_percentage
+                # desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                # place_action(desired_percent_in)
+                # self.prev_value = self.zeus.unrealized_balance()
             else:
                 self.steps_since_push += 1
 
             self.i_step += 1
 
         self.n_steps_left -= 1
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
+        self.t_final_prev = time.time()
 
     def run(self):
-        self.market_encoder.eval()
-        self.encoder_to_others.eval()
-        self.actor_critic.eval()
 
         t0 = time.time()
         while self.n_steps_left > 0:
             n_seconds = min(self.n_steps_left, 500) * 60
             if self.granularity == "M5":
                 n_seconds *= 5
+            if self.test:
+                print("starting new stream")
             self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
             self.start += n_seconds
 
@@ -345,6 +375,25 @@ class Worker(object):
 
 
         return self.total_actual_reward
+
+    def add_to_replay_buffer(self, compressed_experience):
+        # try:
+        #     loc = np.random.randint(0, replay_size) if replay_size > 0 else 0
+        #     ref = self.server.lindex("replay_buffer", loc)
+        #     self.server.linsert("replay_buffer", "before", ref, compressed_experience)
+        # except redis.exceptions.DataError:
+        self.server.lpush("replay_buffer", compressed_experience)
+
+        max_replay_size = int(self.server.get("replay_buffer_size").decode("utf-8"))
+        replay_size = self.server.llen("replay_buffer")
+        while replay_size - 1 > max_replay_size:
+            replay_size = self.server.llen("replay_buffer")
+            try:
+                loc = replay_size - 1
+                ref = self.server.lindex("replay_buffer", loc)
+                self.server.lrem("replay_buffer", -1, ref)
+            except Exception as e:
+                pass
 
 Experience = namedtuple('Experience', ('time_states',
                                        'percents_in',
