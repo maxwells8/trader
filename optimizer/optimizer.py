@@ -137,19 +137,25 @@ class Optimizer(object):
 
             # get some experiences from the replay buffer
             buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
+            n_replay = 0
             if buffer_size > len(self.queued_experience):
-                locs = np.random.choice(np.arange(0, buffer_size, 1), len(self.queued_experience))
-                for loc in locs:
-                    experience = self.server.lindex("replay_buffer", int(loc))
-                    experience = msgpack.unpackb(experience, raw=False)
-                    self.prioritized_experience.append(experience)
+                while n_replay < len(self.queued_experience):
+                    try:
+                        buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
+                        loc = np.random.randint(0, buffer_size)
+                        experience = self.server.lindex("replay_buffer", int(loc))
+                        experience = msgpack.unpackb(experience, raw=False)
+                        self.prioritized_experience.append(experience)
+                        n_replay += 1
+                    except Exception:
+                        pass
 
             experiences = self.queued_experience + self.prioritized_experience
             batch_size = len(experiences)
 
-            if step in [100000]:
-                for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = param_group['lr'] / 10
+            # if step in [10000]:
+            #     for param_group in self.optimizer.param_groups:
+            #         param_group['lr'] = param_group['lr'] / 10
 
             # start grads anew
             self.optimizer.zero_grad()

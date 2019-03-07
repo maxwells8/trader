@@ -9,7 +9,7 @@ import encoder_decoder_regressor
 server = redis.Redis("localhost")
 
 server.set("trajectory_steps", 10)
-server.set("gamma", 0.99)
+server.set("gamma", 0.95)
 
 server.set("max_rho", 1)
 server.set("max_c", 1)
@@ -22,7 +22,7 @@ server.set("actor_v_weight", 1)
 server.set("actor_entropy_weight", 0.001)
 server.set("weight_penalty", 0.0001)
 
-server.set("learning_rate", 0.0001)
+server.set("learning_rate", 0.00001)
 
 server.set("queued_batch_size", 64)
 server.set("replay_buffer_size", 10000)

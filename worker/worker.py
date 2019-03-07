@@ -177,6 +177,7 @@ class Worker(object):
                     else:
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
+            # change_amounts = {0:-10, 1:-5, 2:-1, 3:0, 4:1, 5:5, 6:10}
             change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
             if action in change_amounts:
                 desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
@@ -210,9 +211,15 @@ class Worker(object):
                 available_ = self.zeus.units_available()
                 percent_in_ = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
 
+                expected_placement = 0.
+                for policy_i, policy_v in enumerate(policy[0]):
+                    expected_placement += policy_v.item() * change_amounts[policy_i]
+                expected_placement *= self.trade_percent
+
                 print("step: {s} \
-                \npercent in: {p_in} \
+                \n\t\tpercent in: {p_in} \
                 \naction: {a} \
+                \nexpected_placement: {exp_p} \
                 \nunrealized_balance: {u_b} \
                 \npolicy: {p} \
                 \nvalue: {v} \
@@ -224,6 +231,7 @@ class Worker(object):
                 \nstart: {start}\n".format(s=self.i_step,
                                         p_in=round(percent_in_, 8),
                                         a=action,
+                                        exp_p=expected_placement,
                                         u_b=round(new_val, 5),
                                         p=[round(policy_, 5) for policy_ in policy[0].tolist()],
                                         v=round(value.item(), 5),
@@ -306,11 +314,11 @@ class Worker(object):
                 # p = np.random.rand()
                 # desired_percent_in = np.random.normal(0, 0.5) * p + np.random.normal(percent_in, 0.1) * (1 - p)
                 # desired_percent_in = np.random.normal(0, 1/3)
-                # desired_percent_in = np.random.normal(percent_in, 0.1)
-                # desired_percent_in *= self.tradeable_percentage
-                # desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
-                # place_action(desired_percent_in)
-                # self.prev_value = self.zeus.unrealized_balance()
+                desired_percent_in = np.random.normal(percent_in, 0.1)
+                desired_percent_in *= self.tradeable_percentage
+                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                place_action(desired_percent_in)
+                self.prev_value = self.zeus.unrealized_balance()
             else:
                 self.steps_since_push += 1
 
