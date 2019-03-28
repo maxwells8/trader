@@ -27,7 +27,7 @@ class Worker(object):
     def __init__(self, instrument, granularity, models_loc):
 
         while True:
-            self.market_encoder = CNNEncoder()
+            self.market_encoder = LSTMEncoder()
             self.actor_critic = ActorCritic()
             self.encoder_to_others = EncoderToOthers()
             try:

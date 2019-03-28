@@ -21,7 +21,7 @@ if __name__ == "__main__":
     server = redis.Redis("localhost")
     server.set("p_new_proposal", 1)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
-    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
     instruments = ["EUR_USD"]
     inst_i = 0
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         global inst_i
         start = np.random.randint(1136073600, 1548374400)
         # start = np.random.randint(1546819200, 1546819200 + 1440 * 60 * 7)
-        # start = 1546948800
+        # start = 1546819200
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                if server.llen("experience") < 2048:
+                if server.llen("experience") < 4:
                     processes[i] = start_process(str(i), i)
                     times[i] = time.time()
                     started = True

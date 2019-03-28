@@ -8,11 +8,42 @@ import time
 
 torch.manual_seed(0)
 D_BAR = 5
-D_MODEL = 128
+D_MODEL = 256
 WINDOW = 240
 P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+class FCEncoder(nn.Module):
+    def __init__(self):
+        super(FCEncoder, self).__init__()
+
+        self.initial_fc = nn.Linear(3, D_MODEL)
+        self.initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
+        self.n_layers = 2
+        self.fcs = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_layers)])
+        self.bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_layers)])
+
+    def forward(self, input):
+        x = input.view(-1, 3)
+        x = self.initial_fc(x)
+        x = self.initial_bn(x)
+        x = F.leaky_relu(x)
+
+        for i in range(self.n_layers):
+            if i % 2 == 0:
+                res = x
+                x = self.fcs[i](x)
+                x = self.bns[i](x)
+                x = F.leaky_relu(x)
+            else:
+                x = self.fcs[i](x)
+                x = self.bns[i](x)
+                x = x + res
+                x = F.leaky_relu(x)
+
+        return x
+
 
 class CNNRelationalEncoder(nn.Module):
     """
@@ -273,16 +304,86 @@ class LSTMEncoder(nn.Module):
     def __init__(self):
         super(LSTMEncoder, self).__init__()
 
-        self.n_lstm_layers = 2
-        self.lstm = nn.LSTM(input_size=D_BAR,
+        self.n_bar_layers = 2
+        self.n_lstm_layers = 1
+
+
+        self.initial_layer = nn.Linear(D_BAR, D_MODEL)
+        self.initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
+        self.bar_layers_1 = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_bar_layers)])
+        self.bar_bns_1 = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_bar_layers)])
+        self.dropout = nn.Dropout(p=P_DROPOUT)
+
+        self.lstm_1 = nn.LSTM(input_size=D_MODEL,
+                            hidden_size=D_MODEL,
+                            num_layers=self.n_lstm_layers,
+                            batch_first=True,
+                            dropout=P_DROPOUT)
+
+
+        self.bar_layers_2 = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_bar_layers)])
+        self.bar_bns_2 = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_bar_layers)])
+
+        self.lstm_2 = nn.LSTM(input_size=D_MODEL,
                             hidden_size=D_MODEL,
                             num_layers=self.n_lstm_layers,
                             batch_first=True,
                             dropout=P_DROPOUT)
 
     def forward(self, market_values):
+        """
+        market_values of size (WINDOW, batch_size, D_BAR)
+        """
+        x = market_values.transpose(0, 1)
+        print("market_values:", x)
+        x = self.initial_layer(x)
+        print("after first layer:", x)
+        x = x.transpose(1, 2)
+        x = self.initial_bn(x)
+        for i in range(self.n_bar_layers):
+            x = F.leaky_relu(x)
+            if i % 2 == 0:
+                res = x
+                x = self.dropout(x)
+                x = x.transpose(1, 2)
+                x = self.bar_layers_1[i](x)
+                x = x.transpose(1, 2)
+                x = self.bar_bns_1[i](x)
+                x = self.dropout(x)
+            else:
+                x = x.transpose(1, 2)
+                x = self.bar_layers_1[i](x)
+                x = x.transpose(1, 2)
+                x = self.bar_bns_1[i](x)
+                x = x + res
 
-        x, _ = self.lstm(market_values)
+        x = x.transpose(0, 1)
+        x = x.transpose(0, 2)
+        x, _ = self.lstm_1(x)
+
+        x = x.transpose(0, 1)
+        x = x.transpose(1, 2)
+        for i in range(self.n_bar_layers):
+            x = F.leaky_relu(x)
+            if i % 2 == 0:
+                res = x
+                x = self.dropout(x)
+                x = x.transpose(1, 2)
+                x = self.bar_layers_2[i](x)
+                x = x.transpose(1, 2)
+                x = self.bar_bns_2[i](x)
+                x = self.dropout(x)
+            else:
+                x = x.transpose(1, 2)
+                x = self.bar_layers_2[i](x)
+                x = x.transpose(1, 2)
+                x = self.bar_bns_2[i](x)
+                x = x + res
+
+        x = x.transpose(0, 1)
+        x = x.transpose(0, 2)
+        x, _ = self.lstm_2(x)
+
         return x[-1]
 
 
@@ -322,7 +423,7 @@ class AttentionMarketEncoder(nn.Module):
     def __init__(self):
         super(AttentionMarketEncoder, self).__init__()
 
-        self.Ns = [4]
+        self.Ns = [6]
         self.h = 8
         self.fc_out_middle_size = D_MODEL
 
@@ -606,22 +707,22 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 11
+        self.d_action = 3
         self.dropout = nn.Dropout(P_DROPOUT)
 
         self.combined_initial = nn.Linear(D_MODEL, D_MODEL)
         self.combined_initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
-        self.n_combined_layers = 8
+        self.n_combined_layers = 4
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_combined_layers)])
 
-        self.n_actor_layers = 8
+        self.n_actor_layers = 4
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
 
-        self.n_critic_layers = 8
+        self.n_critic_layers = 4
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
         self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)
@@ -638,10 +739,10 @@ class ActorCritic(nn.Module):
                     res = market_encoding.view(-1, D_MODEL)
                 else:
                     res = x
-                x = self.dropout(x)
+                # x = self.dropout(x)
                 x = self.combined_layers[i](x)
                 x = self.combined_bns[i](x)
-                x = self.dropout(x)
+                # x = self.dropout(x)
                 x = F.leaky_relu(x)
             else:
                 x = self.combined_layers[i](x)
@@ -653,10 +754,10 @@ class ActorCritic(nn.Module):
         for i in range(self.n_actor_layers):
             if i % 2 == 0:
                 res = policy
-                policy = self.dropout(policy)
+                # policy = self.dropout(policy)
                 policy = self.actor_layers[i](policy)
                 policy = self.actor_bns[i](policy)
-                policy = self.dropout(policy)
+                # policy = self.dropout(policy)
                 policy = F.leaky_relu(policy)
             else:
                 policy = self.actor_layers[i](policy)
@@ -671,10 +772,10 @@ class ActorCritic(nn.Module):
         for i in range(self.n_critic_layers):
             if i % 2 == 0:
                 res = critic
-                critic = self.dropout(critic)
+                # critic = self.dropout(critic)
                 critic = self.critic_layers[i](critic)
                 critic = self.critic_bns[i](critic)
-                critic = self.dropout(critic)
+                # critic = self.dropout(critic)
                 critic = F.leaky_relu(critic)
             else:
                 critic = self.critic_layers[i](critic)

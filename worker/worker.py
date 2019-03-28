@@ -30,10 +30,23 @@ class Worker(object):
 
         while True:
             if not test:
-                self.market_encoder = LSTMCNNEncoder().cpu()
+                self.market_encoder = LSTMEncoder().cpu()
                 self.encoder_to_others = EncoderToOthers().cpu()
                 self.actor_critic = ActorCritic().cpu()
+
                 try:
+                    # MEN_compressed_state_dict = self.server.get("market_encoder")
+                    # ETO_compressed_state_dict = self.server.get("encoder_to_others")
+                    # ACN_compressed_state_dict = self.server.get("actor_critic")
+                    #
+                    # MEN_state_dict = msgpack.unpackb(MEN_compressed_state_dict, raw=False)
+                    # ETO_state_dict = msgpack.unpackb(ETO_compressed_state_dict, raw=False)
+                    # ACN_state_dict = msgpack.unpackb(ACN_compressed_state_dict, raw=False)
+                    #
+                    # self.MEN.load_state_dict(MEN_state_dict)
+                    # self.ETO.load_state_dict(ETO_state_dict)
+                    # self.ACN.load_state_dict(ACN_state_dict)
+
                     self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cpu'))
                     self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cpu'))
                     self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cpu'))
@@ -42,7 +55,7 @@ class Worker(object):
                     print("Failed to load models")
                     time.sleep(0.1)
             else:
-                self.market_encoder = LSTMCNNEncoder().cuda()
+                self.market_encoder = LSTMEncoder().cuda()
                 self.encoder_to_others = EncoderToOthers().cuda()
                 self.actor_critic = ActorCritic().cuda()
                 try:
@@ -66,6 +79,7 @@ class Worker(object):
         self.granularity = granularity
 
         self.time_states = []
+        self.all_time_states = []
         self.percents_in = []
         self.spreads = []
         self.mus = []
@@ -80,13 +94,11 @@ class Worker(object):
         self.start = start
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
 
-        self.p_new_proposal = float(self.server.get("p_new_proposal").decode("utf-8"))
-
         self.test = test
         if self.test:
             self.zeus = Zeus(instrument, granularity, margin=1)
             self.tradeable_percentage = 1
-            self.n_steps_left = self.window + 7200
+            self.n_steps_left = self.window + 1440
             self.n_total_experiences = 0
             self.trade_percent = self.tradeable_percentage / 1000
 
@@ -96,7 +108,7 @@ class Worker(object):
         else:
             self.zeus = Zeus(instrument, granularity, margin=0.1)
             self.tradeable_percentage = 1
-            self.n_total_experiences = 25
+            self.n_total_experiences = 15
             self.n_steps_left = self.window + self.trajectory_steps * self.n_total_experiences
             self.trade_percent = self.tradeable_percentage / 1000
 
@@ -114,6 +126,7 @@ class Worker(object):
 
         if len(self.time_states) == 0 or time_state != self.time_states[-1]:
             self.time_states.append(time_state)
+            self.all_time_states.append([bar.open, bar.high, bar.low, bar.close])
         else:
             return
 
@@ -137,14 +150,8 @@ class Worker(object):
             if self.test:
                 # action = torch.argmax(policy).item()
                 action = torch.multinomial(policy, 1).item()
-                # action = torch.multinomial(policy[0, :8], 1).item()
             else:
                 action = torch.multinomial(policy, 1).item()
-                # try:
-                #     action = torch.multinomial(policy[0, :8], 1).item()
-                # except Exception:
-                #     # action = torch.multinomial(policy, 1).item()
-                #     action = np.random.randint(0, 8)
 
             mu = policy[0, action].item()
 
@@ -178,7 +185,8 @@ class Worker(object):
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
             # change_amounts = {0:-10, 1:-5, 2:-1, 3:0, 4:1, 5:5, 6:10}
-            change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
+            # change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
+            change_amounts = {0:-10, 1:0, 2:10}
             if action in change_amounts:
                 desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
                 desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
@@ -187,7 +195,6 @@ class Worker(object):
             new_val = self.zeus.unrealized_balance()
             self.total_actual_reward += new_val - self.prev_value
             reward = (new_val - self.prev_value) / (2000 * self.trade_percent)
-            reward *= 10
             self.prev_value = new_val
             # if self.n_steps_left % 10 == action:
             #     reward = 1
@@ -217,7 +224,7 @@ class Worker(object):
                 expected_placement *= self.trade_percent
 
                 print("step: {s} \
-                \n\t\tpercent in: {p_in} \
+                \n\t\t\t\tpercent in: {p_in} \
                 \naction: {a} \
                 \nexpected_placement: {exp_p} \
                 \nunrealized_balance: {u_b} \
@@ -272,6 +279,14 @@ class Worker(object):
                     self.server.set("reward_ema", reward_ema + self.reward_tau * delta)
                     self.server.set("reward_emsd", math.sqrt((1 - self.reward_tau) * (reward_emsd**2 + self.reward_tau * (delta**2))))
 
+            # print("time_state[0]", self.time_states[-self.window])
+            # print("percent_in", percent_in)
+            # print("spread", bar.spread)
+            # print("place_action", action)
+            # print("policy", policy)
+            # print("reward", reward)
+            # print()
+
             self.percents_in.append(percent_in)
             self.spreads.append(bar.spread)
             self.rewards.append(reward)
@@ -313,8 +328,8 @@ class Worker(object):
 
                 # p = np.random.rand()
                 # desired_percent_in = np.random.normal(0, 0.5) * p + np.random.normal(percent_in, 0.1) * (1 - p)
-                # desired_percent_in = np.random.normal(0, 1/3)
-                desired_percent_in = np.random.normal(percent_in, 0.1)
+                # desired_percent_in = np.random.normal(percent_in, 0.25)
+                desired_percent_in = np.random.normal(0, 0.5)
                 desired_percent_in *= self.tradeable_percentage
                 desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
                 place_action(desired_percent_in)
@@ -380,7 +395,11 @@ class Worker(object):
                 self.server.set("test_ema_" + self.instrument, instrument_ema + instrument_tau * delta)
                 self.server.set("test_emsd_" + self.instrument, math.sqrt((1 - instrument_tau) * (instrument_emsd**2 + instrument_tau * (delta**2))))
 
-
+            # import matplotlib.pyplot as plt
+            # x = np.arange(0, len(self.all_time_states))
+            # y = np.array(self.all_time_states)
+            # plt.plot(x, y)
+            # plt.show()
 
         return self.total_actual_reward
 
