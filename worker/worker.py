@@ -13,6 +13,7 @@ from environment import *
 import redis
 import msgpack
 import math
+import pickle
 from zeus.zeus import Zeus
 
 # np.random.seed(0)
@@ -21,12 +22,17 @@ torch.set_num_threads(1)
 
 class Worker(object):
 
-    def __init__(self, name, instrument, granularity, models_loc, start, test=False):
+    def __init__(self, name, instrument, granularity, server_host, start, test=False):
 
         if not test:
             torch.set_default_tensor_type(torch.FloatTensor)
         else:
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+        self.name = name
+        self.instrument = instrument
+        self.granularity = granularity
+        self.server = redis.Redis(server_host)
 
         while True:
             if not test:
@@ -35,33 +41,47 @@ class Worker(object):
                 self.actor_critic = ActorCritic().cpu()
 
                 try:
-                    # MEN_compressed_state_dict = self.server.get("market_encoder")
-                    # ETO_compressed_state_dict = self.server.get("encoder_to_others")
-                    # ACN_compressed_state_dict = self.server.get("actor_critic")
-                    #
-                    # MEN_state_dict = msgpack.unpackb(MEN_compressed_state_dict, raw=False)
-                    # ETO_state_dict = msgpack.unpackb(ETO_compressed_state_dict, raw=False)
-                    # ACN_state_dict = msgpack.unpackb(ACN_compressed_state_dict, raw=False)
-                    #
-                    # self.MEN.load_state_dict(MEN_state_dict)
-                    # self.ETO.load_state_dict(ETO_state_dict)
-                    # self.ACN.load_state_dict(ACN_state_dict)
+                    MEN_compressed_state_dict = self.server.get("market_encoder")
+                    ETO_compressed_state_dict = self.server.get("encoder_to_others")
+                    ACN_compressed_state_dict = self.server.get("actor_critic")
 
-                    self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cpu'))
-                    self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cpu'))
-                    self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cpu'))
+                    MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
+                    ETO_state_dict_buffer = pickle.loads(ETO_compressed_state_dict)
+                    ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
+
+                    MEN_state_dict_buffer.seek(0)
+                    ETO_state_dict_buffer.seek(0)
+                    ACN_state_dict_buffer.seek(0)
+
+                    self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cpu'))
+                    self.encoder_to_others.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cpu'))
+                    self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cpu'))
+
                     break
-                except Exception:
+                except Exception as e:
                     print("Failed to load models")
                     time.sleep(0.1)
+
             else:
                 self.market_encoder = LSTMEncoder().cuda()
                 self.encoder_to_others = EncoderToOthers().cuda()
                 self.actor_critic = ActorCritic().cuda()
                 try:
-                    self.market_encoder.load_state_dict(torch.load(models_loc + 'market_encoder.pt', map_location='cuda'))
-                    self.encoder_to_others.load_state_dict(torch.load(models_loc + 'encoder_to_others.pt', map_location='cuda'))
-                    self.actor_critic.load_state_dict(torch.load(models_loc + 'actor_critic.pt', map_location='cuda'))
+                    MEN_compressed_state_dict = self.server.get("market_encoder")
+                    ETO_compressed_state_dict = self.server.get("encoder_to_others")
+                    ACN_compressed_state_dict = self.server.get("actor_critic")
+
+                    MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
+                    ETO_state_dict_buffer = pickle.loads(ETO_compressed_state_dict)
+                    ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
+
+                    MEN_state_dict_buffer.seek(0)
+                    ETO_state_dict_buffer.seek(0)
+                    ACN_state_dict_buffer.seek(0)
+
+                    self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
+                    self.encoder_to_others.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
+                    self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
                     break
                 except Exception:
                     print("Failed to load models")
@@ -70,13 +90,6 @@ class Worker(object):
         self.market_encoder.eval()
         self.encoder_to_others.eval()
         self.actor_critic.eval()
-
-        self.name = name
-        self.models_loc = models_loc
-
-        self.server = redis.Redis("localhost")
-        self.instrument = instrument
-        self.granularity = granularity
 
         self.time_states = []
         self.all_time_states = []
@@ -260,9 +273,21 @@ class Worker(object):
 
                 if self.i_step % 100 == 0:
                     try:
-                        self.market_encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt', map_location='cuda'))
-                        self.encoder_to_others.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt', map_location='cuda'))
-                        self.actor_critic.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt', map_location='cuda'))
+                        MEN_compressed_state_dict = self.server.get("market_encoder")
+                        ETO_compressed_state_dict = self.server.get("encoder_to_others")
+                        ACN_compressed_state_dict = self.server.get("actor_critic")
+
+                        MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
+                        ETO_state_dict_buffer = pickle.loads(ETO_compressed_state_dict)
+                        ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
+
+                        MEN_state_dict_buffer.seek(0)
+                        ETO_state_dict_buffer.seek(0)
+                        ACN_state_dict_buffer.seek(0)
+
+                        self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
+                        self.encoder_to_others.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
+                        self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
                     except Exception as e:
                         print("Failed to load models")
 

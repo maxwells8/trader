@@ -335,9 +335,7 @@ class LSTMEncoder(nn.Module):
         market_values of size (WINDOW, batch_size, D_BAR)
         """
         x = market_values.transpose(0, 1)
-        print("market_values:", x)
         x = self.initial_layer(x)
-        print("after first layer:", x)
         x = x.transpose(1, 2)
         x = self.initial_bn(x)
         for i in range(self.n_bar_layers):

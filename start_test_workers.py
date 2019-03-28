@@ -15,10 +15,8 @@ if __name__ == "__main__":
 
     granularity = "M1"
     n_workers = 1
-    import os
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    models_loc = dir_path + '/models/'
-    server = redis.Redis("localhost")
+    server_host = "localhost"
+    server = redis.Redis(server_host)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
     instruments = ["EUR_USD"]
@@ -44,7 +42,7 @@ if __name__ == "__main__":
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 
-        process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, models_loc, start, True))
+        process = multiprocessing.Process(target=start_worker, args=(name, instrument, granularity, server_host, start, True))
         process.start()
 
         return process

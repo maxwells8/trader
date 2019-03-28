@@ -15,6 +15,8 @@ from environment import *
 import redis
 import msgpack
 import os
+import io
+import pickle
 
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -22,41 +24,57 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 class Optimizer(object):
 
-    def __init__(self, models_loc):
+    def __init__(self, models_loc, server_host):
         self.models_loc = models_loc
-        self.server = redis.Redis("localhost")
+        self.server = redis.Redis(server_host)
         self.MEN = LSTMEncoder().cuda()
         self.ETO = EncoderToOthers().cuda()
         self.ACN = ActorCritic().cuda()
         try:
-            # MEN_compressed_state_dict = self.server.get("market_encoder")
-            # ETO_compressed_state_dict = self.server.get("encoder_to_others")
-            # ACN_compressed_state_dict = self.server.get("actor_critic")
-            #
-            # MEN_state_dict = msgpack.unpackb(MEN_compressed_state_dict, raw=False)
-            # ETO_state_dict = msgpack.unpackb(ETO_compressed_state_dict, raw=False)
-            # ACN_state_dict = msgpack.unpackb(ACN_compressed_state_dict, raw=False)
-            #
-            # self.MEN.load_state_dict(MEN_state_dict)
-            # self.ETO.load_state_dict(ETO_state_dict)
-            # self.ACN.load_state_dict(ACN_state_dict)
+            MEN_state_dict_compressed = self.server.get("market_encoder")
+            ETO_state_dict_compressed = self.server.get("encoder_to_others")
+            ACN_state_dict_compressed = self.server.get("actor_critic")
 
-            self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
-            self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
-            self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
+            assert MEN_state_dict_compressed is not None
+            assert ETO_state_dict_compressed is not None
+            assert ACN_state_dict_compressed is not None
 
-        except FileNotFoundError:
+            MEN_state_dict_buffer = pickle.loads(MEN_state_dict_compressed)
+            ETO_state_dict_buffer = pickle.loads(ETO_state_dict_compressed)
+            ACN_state_dict_buffer = pickle.loads(ACN_state_dict_compressed)
+
+            MEN_state_dict_buffer.seek(0)
+            ETO_state_dict_buffer.seek(0)
+            ACN_state_dict_buffer.seek(0)
+
+            self.MEN.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
+            self.ETO.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
+            self.ACN.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
+
+            # self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
+            # self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
+            # self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
+
+        except (FileNotFoundError, AssertionError):
             self.MEN = LSTMEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.ACN = ActorCritic().cuda()
 
-            # MEN_state_dict = msgpack.packb(self.MEN.state_dict(), use_bin_type=True)
-            # ETO_state_dict = msgpack.packb(self.ETO.state_dict(), use_bin_type=True)
-            # ACN_state_dict = msgpack.packb(self.ACN.state_dict(), use_bin_type=True)
-            #
-            # self.server.set("market_encoder", MEN_state_dict)
-            # self.server.set("encoder_to_others", MEN_state_dict)
-            # self.server.set("actor_critic", MEN_state_dict)
+            MEN_state_dict_buffer = io.BytesIO()
+            ETO_state_dict_buffer = io.BytesIO()
+            ACN_state_dict_buffer = io.BytesIO()
+
+            torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
+            torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
+            torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
+
+            MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
+            ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
+            ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
+
+            self.server.set("market_encoder", MEN_state_dict_compressed)
+            self.server.set("encoder_to_others", ETO_state_dict_compressed)
+            self.server.set("actor_critic", ACN_state_dict_compressed)
 
             torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
@@ -86,14 +104,16 @@ class Optimizer(object):
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
 
-            checkpoint = torch.load(models_loc + "rl_train.pt")
-            # checkpoint_compressed_dict = self.server.get("optimizer")
-            # checkpoint = msgpack.unpackb(checkpoint_compressed_dict, raw=False)
+            meta_state_compressed = self.server.get("meta_state")
+            meta_state_buffer = pickle.loads(meta_state_compressed)
+            meta_state_buffer.seek(0)
+
+            checkpoint = torch.load(meta_state_buffer)
 
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
-            self.actor_temp = checkpoint['actor_temp']
+            self.original_actor_temp = checkpoint['original_actor_temp']
 
         except:
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
@@ -101,21 +121,26 @@ class Optimizer(object):
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
+
             self.start_step = 0
             self.start_n_samples = 0
-            self.actor_temp = 5
-            cur_state = {
+            self.original_actor_temp = 5
+            cur_meta_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
-                'actor_temp':self.actor_temp,
+                'original_actor_temp':self.original_actor_temp,
                 'optimizer':self.optimizer.state_dict()
             }
-            torch.save(cur_state, self.models_loc + 'rl_train.pt')
 
-            cur_state_compressed = msgpack.packb(cur_state, use_bin_type=True)
-            self.server.set("optimizer", cur_state_compressed)
+            meta_state_buffer = io.BytesIO()
+            torch.save(cur_meta_state, meta_state_buffer)
+            torch.save(cur_meta_state, 'optimizer.pt')
 
-        self.original_actor_temp = 5
+            cur_meta_state_compressed = pickle.dumps(cur_meta_state)
+            self.server.set("optimizer", cur_meta_state_compressed)
+
+        self.step = self.start_step
+        self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** self.step
         self.server.set("actor_temp", self.actor_temp)
 
     def run(self):
@@ -126,7 +151,6 @@ class Optimizer(object):
         prev_reward_ema = None
         prev_reward_emsd = None
         n_samples = self.start_n_samples
-        step = self.start_step
         while True:
             t0 = time.time()
             n_experiences = 0
@@ -137,7 +161,7 @@ class Optimizer(object):
                     experience = msgpack.unpackb(experience, raw=False)
                     self.queued_experience.append(experience)
                     n_experiences += 1
-                elif (step != 0 or (step == 0 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) > 1:
+                elif (self.step != 0 or (self.step == 0 and len(self.queued_experience) == self.queued_batch_size)) and len(self.queued_experience) > 1:
                     break
                 else:
                     experience = self.server.blpop("experience")[1]
@@ -163,7 +187,7 @@ class Optimizer(object):
             experiences = self.queued_experience + self.prioritized_experience
             batch_size = len(experiences)
 
-            # if step in [10000]:
+            # if self.step in [10000]:
             #     for param_group in self.optimizer.param_groups:
             #         param_group['lr'] = param_group['lr'] / 10
 
@@ -277,53 +301,90 @@ class Optimizer(object):
             total_loss.backward()
             self.optimizer.step()
 
-            step += 1
+            self.step += 1
             n_samples += len(self.queued_experience)
 
             prev_reward_ema = reward_ema
             prev_reward_emsd = reward_emsd
 
             try:
+                MEN_state_dict_buffer = io.BytesIO()
+                ETO_state_dict_buffer = io.BytesIO()
+                ACN_state_dict_buffer = io.BytesIO()
+
+                torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
+                torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
+                torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
+
+                MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
+                ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
+                ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
+
+                self.server.set("market_encoder", MEN_state_dict_compressed)
+                self.server.set("encoder_to_others", ETO_state_dict_compressed)
+                self.server.set("actor_critic", ACN_state_dict_compressed)
+
                 torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
                 torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
                 torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
-                cur_state = {
+                cur_meta_state = {
                     'n_samples':n_samples,
-                    'steps':step,
-                    'actor_temp':self.actor_temp,
+                    'steps':self.step,
+                    'original_actor_temp':self.original_actor_temp,
                     'optimizer':self.optimizer.state_dict()
                 }
-                torch.save(cur_state, self.models_loc + 'rl_train.pt')
+                torch.save(cur_meta_state, self.models_loc + 'rl_train.pt')
             except Exception:
                 print("failed to save")
 
-            if step % 10000 == 0:
+            if self.step % 10000 == 0:
                 try:
                     if not os.path.exists(self.models_loc + 'model_history'):
                         os.makedirs(self.models_loc + 'model_history')
-                    if not os.path.exists(self.models_loc + 'model_history/{step}'.format(step=step)):
-                        os.makedirs(self.models_loc + 'model_history/{step}'.format(step=step))
-                    torch.save(self.MEN.state_dict(), self.models_loc + 'model_history/{step}/market_encoder.pt'.format(step=step))
-                    torch.save(self.ETO.state_dict(), self.models_loc + 'model_history/{step}/encoder_to_others.pt'.format(step=step))
-                    torch.save(self.ACN.state_dict(), self.models_loc + "model_history/{step}/actor_critic.pt".format(step=step))
-                    cur_state = {
+                    if not os.path.exists(self.models_loc + 'model_history/{step}'.format(step=self.step)):
+                        os.makedirs(self.models_loc + 'model_history/{step}'.format(step=self.step))
+                    torch.save(self.MEN.state_dict(), self.models_loc + 'model_history/{step}/market_encoder.pt'.format(step=self.step))
+                    torch.save(self.ETO.state_dict(), self.models_loc + 'model_history/{step}/encoder_to_others.pt'.format(step=self.step))
+                    torch.save(self.ACN.state_dict(), self.models_loc + "model_history/{step}/actor_critic.pt".format(step=self.step))
+                    cur_meta_state = {
                         'n_samples':n_samples,
-                        'steps':step,
-                        'actor_temp':self.actor_temp,
+                        'steps':self.step,
+                        'original_actor_temp':self.original_actor_temp,
                         'optimizer':self.optimizer.state_dict()
                     }
-                    torch.save(cur_state, self.models_loc + 'model_history/{step}/rl_train.pt'.format(step=step))
+                    torch.save(cur_meta_state, self.models_loc + 'model_history/{step}/rl_train.pt'.format(step=self.step))
+
+                    MEN_state_dict_buffer = io.BytesIO()
+                    ETO_state_dict_buffer = io.BytesIO()
+                    ACN_state_dict_buffer = io.BytesIO()
+                    meta_state_buffer = io.BytesIO()
+
+                    torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
+                    torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
+                    torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
+                    torch.save(cur_meta_state, meta_state_buffer)
+
+                    MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
+                    ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
+                    ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
+                    meta_state_compressed = pickle.dumps(meta_state_buffer)
+
+                    self.server.set("market_encoder", MEN_state_dict_compressed)
+                    self.server.set("encoder_to_others", ETO_state_dict_compressed)
+                    self.server.set("actor_critic", ACN_state_dict_compressed)
+                    self.server.set("meta_state", meta_state_compressed)
+
                 except Exception:
                     print("failed to save")
 
-            self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** step
+            self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** self.step
             self.server.set("actor_temp", self.actor_temp)
             self.queued_experience = []
             self.prioritized_experience = []
             # torch.cuda.empty_cache()
 
             print('-----------------------------------------------------------')
-            print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=step, t=round(time.time()-t0, 5)))
+            print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=self.step, t=round(time.time()-t0, 5)))
             print()
 
             print("policy means:", policy.cpu().detach().mean(dim=0))

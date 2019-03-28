@@ -4,7 +4,8 @@ import time
 sys.path.insert(0, './worker')
 sys.path.insert(0, './optimizer')
 
-server = redis.Redis("localhost")
+server_host = "localhost"
+server = redis.Redis(server_host)
 
 server.set("trajectory_steps", 6)
 server.set("gamma", 0.995)
@@ -31,7 +32,7 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 import optimizer
-optimizer.Optimizer(dir_path + '/models/').run()
+optimizer.Optimizer(dir_path + '/models/', server_host).run()
 
 # import gym_optimizer
 # gym_optimizer.Optimizer(dir_path + '/models/').run()
