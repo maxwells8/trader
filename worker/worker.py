@@ -198,8 +198,8 @@ class Worker(object):
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
             # change_amounts = {0:-10, 1:-5, 2:-1, 3:0, 4:1, 5:5, 6:10}
-            # change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
-            change_amounts = {0:-10, 1:0, 2:10}
+            # change_amounts = {0:-10, 1:0, 2:10}
+            change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
             if action in change_amounts:
                 desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
                 desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
@@ -351,14 +351,11 @@ class Worker(object):
                     self.server.lpush("experience", experience)
                 self.steps_since_push = 1
 
-                # p = np.random.rand()
-                # desired_percent_in = np.random.normal(0, 0.5) * p + np.random.normal(percent_in, 0.1) * (1 - p)
-                # desired_percent_in = np.random.normal(percent_in, 0.25)
-                desired_percent_in = np.random.normal(0, 0.5)
-                desired_percent_in *= self.tradeable_percentage
-                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
-                place_action(desired_percent_in)
-                self.prev_value = self.zeus.unrealized_balance()
+                # desired_percent_in = np.random.normal(0, 0.5)
+                # desired_percent_in *= self.tradeable_percentage
+                # desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                # place_action(desired_percent_in)
+                # self.prev_value = self.zeus.unrealized_balance()
             else:
                 self.steps_since_push += 1
 
@@ -371,14 +368,15 @@ class Worker(object):
     def run(self):
 
         t0 = time.time()
+        start = self.start
         while self.n_steps_left > 0:
             n_seconds = min(self.n_steps_left, 500) * 60
             if self.granularity == "M5":
                 n_seconds *= 5
             if self.test:
                 print("starting new stream")
-            self.zeus.stream_range(self.start, self.start + n_seconds, self.add_bar)
-            self.start += n_seconds
+            self.zeus.stream_range(start, start + n_seconds, self.add_bar)
+            start += n_seconds
 
         print(("time: {time}, "
                 "rewards: {reward} %, "

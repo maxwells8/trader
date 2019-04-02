@@ -4,7 +4,7 @@ import time
 sys.path.insert(0, './worker')
 sys.path.insert(0, './optimizer')
 
-server_host = "localhost"
+server_host = "192.168.0.115"
 server = redis.Redis(server_host)
 
 server.set("trajectory_steps", 6)
@@ -23,7 +23,7 @@ server.set("weight_penalty", 0.00001)
 
 server.set("learning_rate", 0.0001)
 
-server.set("queued_batch_size", 32)
+server.set("queued_batch_size", 8)
 server.set("replay_buffer_size", 10000)
 
 server.set("reward_tau", 1e-6)

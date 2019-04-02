@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     granularity = "M1"
     n_workers = 1
-    server_host = "localhost"
+    server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
@@ -26,7 +26,7 @@ if __name__ == "__main__":
         server.set("test_ema_" + inst, 0)
         server.set("test_emsd_" + inst, 0)
 
-    reward_tau = 0.01
+    reward_tau = 0.001
     server.set("test_reward_tau", reward_tau)
     server.set("test_reward_ema", 0)
     server.set("test_reward_emsd", 0)

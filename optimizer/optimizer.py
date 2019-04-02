@@ -31,31 +31,31 @@ class Optimizer(object):
         self.ETO = EncoderToOthers().cuda()
         self.ACN = ActorCritic().cuda()
         try:
-            MEN_state_dict_compressed = self.server.get("market_encoder")
-            ETO_state_dict_compressed = self.server.get("encoder_to_others")
-            ACN_state_dict_compressed = self.server.get("actor_critic")
+            # MEN_state_dict_compressed = self.server.get("market_encoder")
+            # ETO_state_dict_compressed = self.server.get("encoder_to_others")
+            # ACN_state_dict_compressed = self.server.get("actor_critic")
+            #
+            # assert MEN_state_dict_compressed is not None
+            # assert ETO_state_dict_compressed is not None
+            # assert ACN_state_dict_compressed is not None
+            #
+            # MEN_state_dict_buffer = pickle.loads(MEN_state_dict_compressed)
+            # ETO_state_dict_buffer = pickle.loads(ETO_state_dict_compressed)
+            # ACN_state_dict_buffer = pickle.loads(ACN_state_dict_compressed)
+            #
+            # MEN_state_dict_buffer.seek(0)
+            # ETO_state_dict_buffer.seek(0)
+            # ACN_state_dict_buffer.seek(0)
+            #
+            # self.MEN.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
+            # self.ETO.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
+            # self.ACN.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
 
-            assert MEN_state_dict_compressed is not None
-            assert ETO_state_dict_compressed is not None
-            assert ACN_state_dict_compressed is not None
+            self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
+            self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
+            self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
 
-            MEN_state_dict_buffer = pickle.loads(MEN_state_dict_compressed)
-            ETO_state_dict_buffer = pickle.loads(ETO_state_dict_compressed)
-            ACN_state_dict_buffer = pickle.loads(ACN_state_dict_compressed)
-
-            MEN_state_dict_buffer.seek(0)
-            ETO_state_dict_buffer.seek(0)
-            ACN_state_dict_buffer.seek(0)
-
-            self.MEN.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
-            self.ETO.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
-            self.ACN.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
-
-            # self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
-            # self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
-            # self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
-
-        except (FileNotFoundError, AssertionError):
+        except (FileNotFoundError, AssertionError) as e:
             self.MEN = LSTMEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.ACN = ActorCritic().cuda()
@@ -104,18 +104,19 @@ class Optimizer(object):
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
 
-            meta_state_compressed = self.server.get("meta_state")
-            meta_state_buffer = pickle.loads(meta_state_compressed)
-            meta_state_buffer.seek(0)
-
-            checkpoint = torch.load(meta_state_buffer)
+            # meta_state_compressed = self.server.get("meta_state")
+            # meta_state_buffer = pickle.loads(meta_state_compressed)
+            # meta_state_buffer.seek(0)
+            #
+            # checkpoint = torch.load(meta_state_buffer)
+            checkpoint = torch.load("rl_train.pt")
 
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
             self.original_actor_temp = checkpoint['original_actor_temp']
 
-        except:
+        except Exception as e:
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
                                         [param for param in self.ETO.parameters()] +
                                         [param for param in self.ACN.parameters()],
@@ -134,7 +135,7 @@ class Optimizer(object):
 
             meta_state_buffer = io.BytesIO()
             torch.save(cur_meta_state, meta_state_buffer)
-            torch.save(cur_meta_state, 'optimizer.pt')
+            torch.save(cur_meta_state, self.models_loc + 'rl_train.pt')
 
             cur_meta_state_compressed = pickle.dumps(cur_meta_state)
             self.server.set("optimizer", cur_meta_state_compressed)
@@ -220,6 +221,7 @@ class Optimizer(object):
             # print("percent_in[{i}]".format(i=self.trajectory_steps-1), percent_in[self.trajectory_steps-1])
             # print("spread[{i}]".format(i=self.trajectory_steps-1), spread[self.trajectory_steps-1])
             # print()
+
             time_states_ = torch.cat(time_states[self.trajectory_steps:], dim=1).detach().cuda()
             mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
             std = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).std(1).view(batch_size, 1, 1)
@@ -298,6 +300,7 @@ class Optimizer(object):
                 print("actor_entropy_loss", actor_entropy_loss)
                 raise AssertionError("total loss is not 0")
 
+
             total_loss.backward()
             self.optimizer.step()
 
@@ -308,32 +311,38 @@ class Optimizer(object):
             prev_reward_emsd = reward_emsd
 
             try:
-                MEN_state_dict_buffer = io.BytesIO()
-                ETO_state_dict_buffer = io.BytesIO()
-                ACN_state_dict_buffer = io.BytesIO()
-
-                torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
-                torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
-                torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
-
-                MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
-                ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
-                ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
-
-                self.server.set("market_encoder", MEN_state_dict_compressed)
-                self.server.set("encoder_to_others", ETO_state_dict_compressed)
-                self.server.set("actor_critic", ACN_state_dict_compressed)
-
-                torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
-                torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
-                torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
-                cur_meta_state = {
+                if self.step % 100 == 0:
+                    cur_meta_state = {
                     'n_samples':n_samples,
                     'steps':self.step,
                     'original_actor_temp':self.original_actor_temp,
                     'optimizer':self.optimizer.state_dict()
-                }
-                torch.save(cur_meta_state, self.models_loc + 'rl_train.pt')
+                    }
+
+                    MEN_state_dict_buffer = io.BytesIO()
+                    ETO_state_dict_buffer = io.BytesIO()
+                    ACN_state_dict_buffer = io.BytesIO()
+                    meta_state_buffer = io.BytesIO()
+
+                    torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
+                    torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
+                    torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
+                    torch.save(cur_meta_state, meta_state_buffer)
+
+                    MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
+                    ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
+                    ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
+                    meta_state_compressed = pickle.dumps(meta_state_buffer)
+
+                    self.server.set("market_encoder", MEN_state_dict_compressed)
+                    self.server.set("encoder_to_others", ETO_state_dict_compressed)
+                    self.server.set("actor_critic", ACN_state_dict_compressed)
+                    self.server.set("meta_state", meta_state_compressed)
+
+                    torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
+                    torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
+                    torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
+                    torch.save(cur_meta_state, self.models_loc + 'rl_train.pt')
             except Exception:
                 print("failed to save")
 

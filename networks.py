@@ -304,7 +304,7 @@ class LSTMEncoder(nn.Module):
     def __init__(self):
         super(LSTMEncoder, self).__init__()
 
-        self.n_bar_layers = 2
+        self.n_bar_layers = 1
         self.n_lstm_layers = 1
 
 
@@ -705,22 +705,22 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 3
+        self.d_action = 11
         self.dropout = nn.Dropout(P_DROPOUT)
 
         self.combined_initial = nn.Linear(D_MODEL, D_MODEL)
         self.combined_initial_bn = nn.BatchNorm1d(D_MODEL, eps=1e-9)
-        self.n_combined_layers = 4
+        self.n_combined_layers = 1
         self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
         self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_combined_layers)])
 
-        self.n_actor_layers = 4
+        self.n_actor_layers = 1
         self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
         self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_actor_layers)])
         self.actor_out = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
 
-        self.n_critic_layers = 4
+        self.n_critic_layers = 1
         self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
         self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL, eps=1e-9) for _ in range(self.n_critic_layers)])
         self.critic_out = nn.Linear(D_MODEL, 1)

@@ -14,8 +14,8 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 16
-    server_host = "localhost"
+    n_workers = 24
+    server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     server.set("p_new_proposal", 1)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
@@ -31,6 +31,7 @@ if __name__ == "__main__":
         global inst_i
         start = np.random.randint(1136073600, 1548374400)
         # start = np.random.randint(1546819200, 1546819200 + 1440 * 60 * 7)
+        # start = np.random.randint(1546819200, 1546819200 + 60 * 60 * 1)
         # start = 1546819200
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -49,7 +50,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 30:
+            while process.is_alive() and time.time() - times[i] < 15:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -67,7 +68,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                if server.llen("experience") < 4:
+                if server.llen("experience") < 256:
                     processes[i] = start_process(str(i), i)
                     times[i] = time.time()
                     started = True
