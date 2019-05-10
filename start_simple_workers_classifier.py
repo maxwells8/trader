@@ -9,31 +9,32 @@ import numpy as np
 import time
 import random
 import networks
-from start_simple_worker_regressor import start_worker
+from start_simple_worker_classifier import start_worker
 
 if __name__ == "__main__":
 
     server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     n_workers = 24
-    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
-    # instruments = ["EUR_USD"]
+    # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    instruments = ["EUR_USD"]
     inst_i = 0
 
-    # start_start = 1341446400
+    # start_start = 1136073600
     n_workers_total = 0
     def start_process(n):
         global inst_i
-        # global start_start
+        global start_start
 
         granularity = "M1"
 
-        start = np.random.randint(1136073600, 1548374400)
+        # start = np.random.randint(1136073600, 1548374400)
         # start = np.random.randint(1546819200, 1547446980)
         # start = np.random.randint(1546819200, 1546923420)
+        start = np.random.randint(1514764800, 1546300800)
         # start = 1546819200
         # start = start_start
-        # start_start += 86400 * 7
+        # start_start += 86400 * 1000
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -53,7 +54,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 15:
+            while process.is_alive() and time.time() - times[i] < 45:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -71,8 +72,8 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                # if server.llen("experience_dev") < 32:
-                if server.llen("experience") < 100000:
+                # if server.llen("experience_dev") < 10000:
+                if server.llen("experience") < 4096:
                     processes[i] = start_process(i)
                     times[i] = time.time()
                     started = True

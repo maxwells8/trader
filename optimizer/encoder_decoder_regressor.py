@@ -5,103 +5,123 @@ import torch.nn.functional as F
 import numpy as np
 import math
 import time
-import heapq
 import sys
 sys.path.insert(0, '../worker')
 from simple_worker_regressor import Experience
-import networks
 from networks import *
-from environment import *
+import networks
+import io
+import pickle
 import redis
 import msgpack
+import os
+
+torch.manual_seed(0)
+torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 class Optimizer(object):
 
-    def __init__(self, models_loc):
-        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+    def __init__(self, models_loc, server_host):
 
-        self.server = redis.Redis("localhost")
-        self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
-        self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
-
+        self.server = redis.Redis(server_host)
         self.models_loc = models_loc
+        self.base_learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
+        self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
 
-        self.encoder = CNNEncoder().cuda()
-        self.decoder = Decoder().cuda()
-        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
-        self.start_n_samples = 0
-        self.start_step = 0
-        self.start_pos_ema = 0
-        self.start_neg_ema = 0
-        self.start_value_ema = 0
+        self.generator = Generator().cuda()
+        self.discriminator = Discriminator().cuda()
+        self.generator_optimizer = optim.Adam([param for param in self.generator.parameters()],
+                                            weight_decay=self.weight_penalty)
+        self.discriminator_optimizer = optim.Adam([param for param in self.discriminator.parameters()],
+                                            weight_decay=self.weight_penalty)
+
         try:
-            self.encoder.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
-            self.decoder.load_state_dict(torch.load(self.models_loc + 'decoder.pt'))
-            checkpoint = torch.load(self.models_loc + 'encoder_train.pt')
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            # models
+            self.generator.load_state_dict(torch.load(self.models_loc + 'generator.pt'))
+            self.discriminator.load_state_dict(torch.load(self.models_loc + 'discriminator.pt'))
+
+            # optimizer
+            checkpoint = torch.load(self.models_loc + "meta_state.pt")
+
+            self.generator_optimizer.load_state_dict(checkpoint['generator_optimizer'])
+            self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer'])
             self.start_step = checkpoint['steps']
             self.start_n_samples = checkpoint['n_samples']
-            self.start_pos_ema = checkpoint['pos_ema']
-            self.start_neg_ema = checkpoint['neg_ema']
-            self.start_value_ema = checkpoint['value_ema']
-            self.start_value_ema = 0
-        except Exception as e:
-            print(e)
-            torch.save(self.encoder.state_dict(), self.models_loc + 'market_encoder.pt')
-            torch.save(self.decoder.state_dict(), self.models_loc + 'decoder.pt')
-            self.start_n_samples = 0
+
+            meta_state_buffer = io.BytesIO()
+            torch.save(checkpoint, meta_state_buffer)
+            torch.save(checkpoint, self.models_loc + 'meta_state.pt')
+
+        except (FileNotFoundError, AssertionError) as e:
+            self.generator = Generator().cuda()
+            self.discriminator = Discriminator().cuda()
+            self.generator_optimizer = optim.Adam([param for param in self.generator.parameters()],
+                                                weight_decay=self.weight_penalty)
+            self.discriminator_optimizer = optim.Adam([param for param in self.discriminator.parameters()],
+                                                weight_decay=self.weight_penalty)
+
+            torch.save(self.generator.state_dict(), self.models_loc + 'generator.pt')
+            torch.save(self.discriminator.state_dict(), self.models_loc + 'discriminator.pt')
+
             self.start_step = 0
-            self.start_pos_ema = 0
-            self.start_neg_ema = 0
-            self.start_value_ema = 0
-            cur_state = {
+            self.start_n_samples = 0
+            cur_meta_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
-                'p profit':self.start_pos_ema,
-                'p loss':self.start_neg_ema,
-                'value_ema':self.start_value_ema,
-                'optimizer':self.optimizer.state_dict()
+                'generator_optimizer':self.generator_optimizer.state_dict(),
+                'discriminator_optimizer':self.discriminator_optimizer.state_dict()
             }
-            torch.save(cur_state, self.models_loc + 'encoder_train.pt')
 
-        n_param_encoder = 0
-        for param in self.encoder.parameters():
-            n_param_ = 1
-            for size in param.size():
-                n_param_ *= size
-            n_param_encoder += n_param_
-        print("encoder number of parameters:", n_param_encoder)
+            meta_state_buffer = io.BytesIO()
+            torch.save(cur_meta_state, meta_state_buffer)
+            torch.save(cur_meta_state, self.models_loc + 'meta_state.pt')
+
+            cur_meta_state_compressed = pickle.dumps(cur_meta_state)
+            self.server.set("optimizer", cur_meta_state_compressed)
+
+        self.loss = nn.BCELoss()
+
+        self.n_samples = self.start_n_samples
+        self.step = self.start_step
+
+        n = 0
+        for param in self.generator.parameters():
+            n += np.prod(param.size())
+        print("generator parameters:", n)
+        n = 0
+        for param in self.discriminator.parameters():
+            n += np.prod(param.size())
+        print("discriminator parameters:", n)
 
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
-        self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
+        self.KL_coef = float(self.server.get("KL_coef").decode("utf-8"))
 
         self.window = networks.WINDOW
 
-        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=self.learning_rate, weight_decay=self.weight_penalty)
+    def set_learning_rate(self):
+        n_warm_up = 2000
+        if self.step < n_warm_up:
+            lr = self.step * self.base_learning_rate / n_warm_up
+        else:
+            lr = self.base_learning_rate
+        # lr = self.base_learning_rate
+        print("learning rate: {lr}".format(lr=lr))
+        for optimizer in [self.generator_optimizer, self.discriminator_optimizer]:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
 
     def run(self):
-        n_samples = self.start_n_samples
-        step = self.start_step
-        t0 = time.time()
-
-        loss_ema = 0
-        loss_tau = 0.01
-
-        t = 0
-        t_tau = 0.05
-
-        pos_neg_tau = 0.0001
-        pos_ema = self.start_pos_ema
-        neg_ema = self.start_neg_ema
-
-        value_tau = 0.0001
-        value_ema = self.start_value_ema
+        self.generator.train()
+        self.discriminator.train()
 
         while True:
+            t0 = time.time()
+
+            self.set_learning_rate()
+
             n_experiences = 0
             # read in experience from the queue
             experiences = []
-            t_tot = 0
             while True:
                 if len(experiences) < self.batch_size:
                     experience = self.server.blpop("experience")[1]
@@ -110,119 +130,105 @@ class Optimizer(object):
                     n_experiences += 1
                 else:
                     break
+                # if len(experiences) < self.batch_size:
+                #     experience = self.server.lindex("experience_dev", len(experiences))
+                #     experience = msgpack.unpackb(experience, raw=False)
+                #     experiences.append(experience)
+                #     n_experiences += 1
+                # else:
+                #     break
 
-            self.optimizer.zero_grad()
+            np.random.shuffle(experiences)
+            batch_size = len(experiences)
+
+            self.generator_optimizer.zero_grad()
+            self.discriminator_optimizer.zero_grad()
 
             batch = Experience(*zip(*experiences))
-            input_time_states = [*zip(*batch.input_time_states)]
-            for i, time_state_ in enumerate(input_time_states):
-                input_time_states[i] = torch.Tensor(time_state_).view(self.batch_size, 1, networks.D_BAR)
-            initial_spreads = batch.initial_spread
-            final_time_states = torch.Tensor(batch.final_time_state).view(self.batch_size, 1, networks.D_BAR)
-            final_spreads = batch.final_spread
-            steps = torch.Tensor(batch.steps)
+            time_states = [*zip(*batch.time_states)]
+            for i, time_state_ in enumerate(time_states):
+                time_states[i] = torch.Tensor(time_state_).view(batch_size, 1, networks.D_BAR)
 
             total_loss = torch.Tensor([0])
+            loss = torch.Tensor([0])
+            kl_loss = torch.Tensor([0])
 
-            input_time_states_ = torch.cat(input_time_states, dim=1).clone().cuda()
-            mean = input_time_states_[:, :, :4].contiguous().view(len(experiences), -1).mean(1).view(len(experiences), 1, 1)
-            std = input_time_states_[:, :, :4].contiguous().view(len(experiences), -1).std(1).view(len(experiences), 1, 1)
-            input_time_states_[:, :, :4] = (input_time_states_[:, :, :4] - mean) / std
-            spread_ = torch.Tensor(initial_spreads).view(-1, 1, 1).cuda() / std
-            input_time_states_ = input_time_states_.transpose(0, 1)
+            input_time_states = torch.cat(time_states[:self.window], dim=1).cuda()
 
-            market_encoding = self.encoder.forward(input_time_states_)
-            value_estimation = self.decoder.forward(market_encoding, spread_, steps.log().cuda())
+            next_time_states = torch.cat(time_states[self.window:], dim=1).cuda()
+            n_future = next_time_states.size()[1]
 
-            # since the data time_state is using the bid price, we calculate
-            # the normalized profit as follows
-            future_value = final_time_states[:,:,3].cuda()
+            generation, enc_means, enc_stds = self.generator(input_time_states[:(batch_size // 2)])
 
-            potential_gain_buy = future_value.clone()
-            potential_gain_buy -= input_time_states[-1][:,:,3].cuda()
-            potential_gain_buy -= torch.Tensor(initial_spreads).view(-1, 1)
-            potential_gain_buy = potential_gain_buy / (std.view(-1, 1) * torch.sqrt(steps).view(-1, 1))
+            queried = torch.cat([generation, next_time_states[(batch_size // 2):]], dim=0)
+            discrimination = self.discriminator(input_time_states, queried)
 
-            potential_gain_sell = input_time_states[-1][:,:,3].clone().cuda()
-            potential_gain_sell -= future_value.clone()
-            potential_gain_sell -= torch.Tensor(final_spreads).view(-1, 1)
-            potential_gain_sell = potential_gain_sell / (std.view(-1, 1) * torch.sqrt(steps).view(-1, 1))
+            discriminator_loss = self.loss(discrimination, torch.cat([torch.zeros(batch_size // 2, 1), torch.ones(batch_size // 2, 1)], 0))
 
-            actor_pot_loss_buy = F.l1_loss(value_estimation[:, 0].view(-1, 1), potential_gain_buy.detach())
-            actor_pot_loss_sell = F.l1_loss(value_estimation[:, 1].view(-1, 1), potential_gain_sell.detach())
+            discriminator_loss.backward(retain_graph=True)
+            self.discriminator_optimizer.step()
 
-            total_loss += actor_pot_loss_buy.mean() + actor_pot_loss_sell.mean()
+            self.generator_optimizer.zero_grad()
+            generator_loss = self.loss(discrimination[:(batch_size // 2)], torch.ones(batch_size // 2, 1))
+            kl_loss = 0.5 * torch.mean(torch.pow(enc_stds, 2) + torch.pow(enc_means, 2) - torch.log(1e-5 + torch.pow(enc_stds, 2)) - 1)
+            gen_total_loss = generator_loss + self.KL_coef * kl_loss
 
-            # print(value_estimation[:, 0], potential_gain_buy.squeeze())
-            # print(value_estimation[:, 1], potential_gain_sell.squeeze())
-            # print()
-            value = 0
-            for j in range(self.batch_size):
-                guesses = [float(value_estimation[j, 0]), float(value_estimation[j, 1]), 0]
-                targets = [float(potential_gain_buy[j, 0]), float(potential_gain_sell[j, 0]), 0]
+            gen_total_loss.backward(retain_graph=False)
+            self.generator_optimizer.step()
 
-                # print(guesses)
-                # print(targets)
-                # print()
+            self.step += 1
+            self.n_samples += n_experiences
 
-                if np.argmax(guesses) == 0:
-                    value = float(potential_gain_buy[j] * (std.view(-1)[j] * torch.sqrt(steps.view(-1)[j])))
-                elif np.argmax(guesses) == 1:
-                    value = float(potential_gain_sell[j] * (std.view(-1)[j] * torch.sqrt(steps.view(-1)[j])))
-                else:
-                    value = 0
+            if self.step % 10 == 0:
+                print("std(encoding mean):", enc_means.std().cpu().detach().numpy())
+                print("std(encoding std):", enc_stds.std().cpu().detach().numpy())
+                print("generation mean:", generation.view(-1, D_BAR).mean(0).cpu().detach().numpy())
+                print("actual mean:", next_time_states.view(-1, D_BAR).mean(0).cpu().detach().numpy())
+                print("sample generation:", generation[0][0].cpu().detach().numpy())
+                print("sample actual:", next_time_states[0][0].cpu().detach().numpy())
+                print("sample discrimination:", discrimination[0][0].cpu().detach().numpy())
+            print("step: {step}, n_samples: {n_samples}, time: {time}, dis_target: {dis_target}, dis_gen: {dis_gen}, kl_loss: {kl_loss}, gen_loss: {gen_loss}, dis_loss: {dis_loss}".format(step=self.step,
+                n_samples=self.n_samples,
+                time=round(time.time() - t0, 5),
+                dis_target=round(discrimination[(batch_size // 2):].mean().item(), 5),
+                dis_gen=round(discrimination[:(batch_size // 2)].mean().item(), 5),
+                kl_loss=round(kl_loss.cpu().item(), 5),
+                gen_loss=round(generator_loss.cpu().item(), 5),
+                dis_loss=round(discriminator_loss.cpu().item(), 5)))
+            print('-----------------------------------------------------------------------')
 
-                value_ema = (value_tau * value) + ((1 - value_tau) * value_ema)
+            if self.step % 100 == 0:
+                try:
+                    cur_meta_state = {
+                        'n_samples':self.n_samples,
+                        'steps':self.step,
+                        'generator_optimizer':self.generator_optimizer.state_dict(),
+                        'discriminator_optimizer':self.discriminator_optimizer.state_dict()
+                    }
 
-                positive = False
-                negative = False
-                if value > 0:
-                    positive = True
-                elif value < 0:
-                    negative = True
+                    torch.save(self.generator.state_dict(), self.models_loc + 'generator.pt')
+                    torch.save(self.discriminator.state_dict(), self.models_loc + 'discriminator.pt')
+                    torch.save(cur_meta_state, self.models_loc + 'meta_state.pt')
+                except Exception:
+                    print("failed to save")
 
-                pos_ema = positive * pos_neg_tau + pos_ema * (1 - pos_neg_tau)
-                neg_ema = negative * pos_neg_tau + neg_ema * (1 - pos_neg_tau)
+            if self.step % 10000 == 0:
+                try:
+                    if not os.path.exists(self.models_loc + 'model_history'):
+                        os.makedirs(self.models_loc + 'model_history')
+                    if not os.path.exists(self.models_loc + 'model_history/{step}'.format(step=self.step)):
+                        os.makedirs(self.models_loc + 'model_history/{step}'.format(step=self.step))
+                    torch.save(self.generator.state_dict(), self.models_loc + 'model_history/{step}/generator.pt'.format(step=self.step))
+                    torch.save(self.discriminator.state_dict(), self.models_loc + 'model_history/{step}/discriminator.pt'.format(step=self.step))
+                    cur_meta_state = {
+                        'n_samples':self.n_samples,
+                        'steps':self.step,
+                        'generator_optimizer':self.generator_optimizer.state_dict(),
+                        'discriminator_optimizer':self.discriminator_optimizer.state_dict()
+                    }
+                    torch.save(cur_meta_state, self.models_loc + 'model_history/{step}/meta_state.pt'.format(step=self.step))
 
-            if loss_ema == 0:
-                loss_ema = float(total_loss)
-            else:
-                loss_ema = float(total_loss) * loss_tau + (loss_ema) * (1 - loss_tau)
-
-            assert torch.isnan(total_loss).sum() == 0
-
-            total_loss.backward()
-            self.optimizer.step()
-
-            step += 1
-            n_samples += n_experiences
-
-            print("n samples: {n}, steps: {s}, time ema: {t}, loss ema: {l}, gain ema: {v}, pos ema: {pos}, neg ema: {neg}".format(
-                n=n_samples,
-                s=step,
-                t=round(t, 5),
-                l=round(loss_ema, 5),
-                v=round(value_ema, 8),
-                pos=round(pos_ema, 5),
-                neg=round(neg_ema, 5)
-            ))
-
-            try:
-                torch.save(self.encoder.state_dict(), self.models_loc + "market_encoder.pt")
-                torch.save(self.decoder.state_dict(), self.models_loc + "decoder.pt")
-                cur_state = {
-                    'n_samples':n_samples,
-                    'steps':step,
-                    'pos_ema':pos_ema,
-                    'neg_ema':neg_ema,
-                    'value_ema':value_ema,
-                    'optimizer':self.optimizer.state_dict()
-                }
-                torch.save(cur_state, self.models_loc + 'encoder_train.pt')
-            except Exception as e:
-                print("failed to save")
-
-            if t == 0:
-                t = time.time() - t0
-            t = (time.time() - t0) * t_tau + t * (1 - t_tau)
-            t0 = time.time()
+                except Exception as e:
+                    print(e)
+                    assert False
+                    print("failed to save")

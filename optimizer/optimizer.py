@@ -27,35 +27,58 @@ class Optimizer(object):
     def __init__(self, models_loc, server_host):
         self.models_loc = models_loc
         self.server = redis.Redis(server_host)
+
+
+        self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
+        self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
+
         self.MEN = LSTMEncoder().cuda()
         self.ETO = EncoderToOthers().cuda()
         self.ACN = ActorCritic().cuda()
-        try:
-            # MEN_state_dict_compressed = self.server.get("market_encoder")
-            # ETO_state_dict_compressed = self.server.get("encoder_to_others")
-            # ACN_state_dict_compressed = self.server.get("actor_critic")
-            #
-            # assert MEN_state_dict_compressed is not None
-            # assert ETO_state_dict_compressed is not None
-            # assert ACN_state_dict_compressed is not None
-            #
-            # MEN_state_dict_buffer = pickle.loads(MEN_state_dict_compressed)
-            # ETO_state_dict_buffer = pickle.loads(ETO_state_dict_compressed)
-            # ACN_state_dict_buffer = pickle.loads(ACN_state_dict_compressed)
-            #
-            # MEN_state_dict_buffer.seek(0)
-            # ETO_state_dict_buffer.seek(0)
-            # ACN_state_dict_buffer.seek(0)
-            #
-            # self.MEN.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
-            # self.ETO.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
-            # self.ACN.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
 
+        self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
+                                    [param for param in self.ETO.parameters()] +
+                                    [param for param in self.ACN.parameters()],
+                                    lr=self.learning_rate,
+                                    weight_decay=self.weight_penalty)
+        try:
+            # models
             self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
             self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
 
+            MEN_state_dict_buffer = io.BytesIO()
+            ETO_state_dict_buffer = io.BytesIO()
+            ACN_state_dict_buffer = io.BytesIO()
+
+            torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
+            torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
+            torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
+
+            MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
+            ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
+            ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
+
+            self.server.set("market_encoder", MEN_state_dict_compressed)
+            self.server.set("encoder_to_others", ETO_state_dict_compressed)
+            self.server.set("actor_critic", ACN_state_dict_compressed)
+
+            # optimizer
+            checkpoint = torch.load(self.models_loc + "rl_train.pt")
+
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            self.start_step = checkpoint['steps']
+            self.start_n_samples = checkpoint['n_samples']
+            self.original_actor_temp = checkpoint['original_actor_temp']
+
+            meta_state_buffer = io.BytesIO()
+            torch.save(checkpoint, meta_state_buffer)
+            meta_state_compressed = pickle.dumps(meta_state_buffer)
+            self.server.set("meta_state", meta_state_compressed)
+            torch.save(checkpoint, self.models_loc + 'rl_train.pt')
+
         except (FileNotFoundError, AssertionError) as e:
+            # models
             self.MEN = LSTMEncoder().cuda()
             self.ETO = EncoderToOthers().cuda()
             self.ACN = ActorCritic().cuda()
@@ -80,43 +103,7 @@ class Optimizer(object):
             torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
             torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
 
-        self.actor_temp_cooldown = float(self.server.get("actor_temp_cooldown").decode("utf-8"))
-        self.gamma = float(self.server.get("gamma").decode("utf-8"))
-        self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
-        self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
-        self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))]).cuda()
-
-        self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
-        self.actor_v_weight = float(self.server.get("actor_v_weight").decode("utf-8"))
-        self.actor_entropy_weight = float(self.server.get("actor_entropy_weight").decode("utf-8"))
-        self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
-
-        self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
-
-        self.queued_batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
-
-        self.queued_experience = []
-        self.prioritized_experience = []
-        try:
-            self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
-                                        [param for param in self.ETO.parameters()] +
-                                        [param for param in self.ACN.parameters()],
-                                        lr=self.learning_rate,
-                                        weight_decay=self.weight_penalty)
-
-            # meta_state_compressed = self.server.get("meta_state")
-            # meta_state_buffer = pickle.loads(meta_state_compressed)
-            # meta_state_buffer.seek(0)
-            #
-            # checkpoint = torch.load(meta_state_buffer)
-            checkpoint = torch.load("rl_train.pt")
-
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
-            self.start_step = checkpoint['steps']
-            self.start_n_samples = checkpoint['n_samples']
-            self.original_actor_temp = checkpoint['original_actor_temp']
-
-        except Exception as e:
+            # optimizer
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
                                         [param for param in self.ETO.parameters()] +
                                         [param for param in self.ACN.parameters()],
@@ -140,6 +127,21 @@ class Optimizer(object):
             cur_meta_state_compressed = pickle.dumps(cur_meta_state)
             self.server.set("optimizer", cur_meta_state_compressed)
 
+        self.actor_temp_cooldown = float(self.server.get("actor_temp_cooldown").decode("utf-8"))
+        self.gamma = float(self.server.get("gamma").decode("utf-8"))
+        self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
+        self.max_rho = torch.Tensor([float(self.server.get("max_rho").decode("utf-8"))]).cuda()
+        self.max_c = torch.Tensor([float(self.server.get("max_c").decode("utf-8"))]).cuda()
+
+        self.critic_weight = float(self.server.get("critic_weight").decode("utf-8"))
+        self.actor_v_weight = float(self.server.get("actor_v_weight").decode("utf-8"))
+        self.actor_entropy_weight = float(self.server.get("actor_entropy_weight").decode("utf-8"))
+
+        self.queued_batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
+
+        self.queued_experience = []
+        self.prioritized_experience = []
+
         self.step = self.start_step
         self.actor_temp = 1 + (self.original_actor_temp - 1) * self.actor_temp_cooldown ** self.step
         self.server.set("actor_temp", self.actor_temp)
@@ -149,8 +151,6 @@ class Optimizer(object):
         self.ETO.train()
         self.ACN.train()
 
-        prev_reward_ema = None
-        prev_reward_emsd = None
         n_samples = self.start_n_samples
         while True:
             t0 = time.time()
@@ -217,16 +217,11 @@ class Optimizer(object):
             actor_v_loss = torch.Tensor([0]).cuda()
             actor_entropy_loss = torch.Tensor([0]).cuda()
 
-            # print("time_states[{i}][-1]".format(i=self.trajectory_steps), time_states[-1])
-            # print("percent_in[{i}]".format(i=self.trajectory_steps-1), percent_in[self.trajectory_steps-1])
-            # print("spread[{i}]".format(i=self.trajectory_steps-1), spread[self.trajectory_steps-1])
-            # print()
-
             time_states_ = torch.cat(time_states[self.trajectory_steps:], dim=1).detach().cuda()
             mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
-            std = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).std(1).view(batch_size, 1, 1)
-            time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
-            spread_ = torch.Tensor(spread[self.trajectory_steps-1]).view(-1, 1, 1).cuda() / std
+            time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) * 10000 / mean
+            spread_ = torch.Tensor(spread[self.trajectory_steps-1]).view(-1, 1, 1).cuda()
+            # spread = spread_ * 10000 / mean
             time_states_ = time_states_.transpose(0, 1)
 
             market_encoding = self.MEN.forward(time_states_)
@@ -236,20 +231,12 @@ class Optimizer(object):
             v_next = value.detach()
             v_trace = value.detach()
             for i in range(self.trajectory_steps - 2, -1, -1):
-                # print(i)
-                # print("time_states[{i}][-1]".format(i=i+1), time_states[window+i])
-                # print("percent_in[{i}]".format(i=i), percent_in[i])
-                # print("spread[{i}]".format(i=i), spread[i])
-                # print("place_action[{i}]".format(i=i), place_action[i])
-                # print("mu[{i}]".format(i=i), mu[i])
-                # print("reward[{i}]".format(i=i), reward[i])
-                # print()
 
                 time_states_ = torch.cat(time_states[i+1:window+i+1], dim=1).cuda()
                 mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
-                std = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).std(1).view(batch_size, 1, 1)
-                time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) / std
-                spread_ = torch.Tensor(spread[i]).view(-1, 1, 1).cuda() / std
+                time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) * 10000 / mean
+                spread_ = torch.Tensor(spread[i]).view(-1, 1, 1).cuda()
+                # spread = spread_ * 10000 / mean
                 time_states_ = time_states_.transpose(0, 1)
 
                 market_encoding = self.MEN.forward(time_states_)
@@ -302,16 +289,15 @@ class Optimizer(object):
 
 
             total_loss.backward()
+            # for name, param in self.MEN.named_parameters():
+            #     print(name, param.grad)
             self.optimizer.step()
 
             self.step += 1
             n_samples += len(self.queued_experience)
 
-            prev_reward_ema = reward_ema
-            prev_reward_emsd = reward_emsd
-
             try:
-                if self.step % 100 == 0:
+                if self.step % 25 == 0:
                     cur_meta_state = {
                     'n_samples':n_samples,
                     'steps':self.step,

@@ -91,6 +91,13 @@ class Worker(object):
         self.encoder_to_others.eval()
         self.actor_critic.eval()
 
+        if test:
+            n = 0
+            for network in [self.market_encoder, self.encoder_to_others, self.actor_critic]:
+                for param in network.parameters():
+                    n += np.prod(param.size())
+            print("number of parameters:", n)
+
         self.time_states = []
         self.all_time_states = []
         self.percents_in = []
@@ -111,13 +118,11 @@ class Worker(object):
         if self.test:
             self.zeus = Zeus(instrument, granularity, margin=1)
             self.tradeable_percentage = 1
-            self.n_steps_left = self.window + 1440
+            self.n_steps_left = self.window + 7200
             self.n_total_experiences = 0
             self.trade_percent = self.tradeable_percentage / 1000
 
             self.actor_temp = 1
-            self.proposer_temps = {"w":1, "mu":1, "sigma":1}
-            self.proposer_gate_temp = 1
         else:
             self.zeus = Zeus(instrument, granularity, margin=0.1)
             self.tradeable_percentage = 1
@@ -134,8 +139,11 @@ class Worker(object):
 
         self.prev_value = self.zeus.unrealized_balance()
 
+        self.all_bars = []
+        self.all_times = []
+
     def add_bar(self, bar):
-        time_state = [[[bar.open, bar.high, bar.low, bar.close, np.log(bar.volume + 1e-1)]]]
+        time_state = [[[bar.open, bar.high, bar.low, bar.close]]]
 
         if len(self.time_states) == 0 or time_state != self.time_states[-1]:
             self.time_states.append(time_state)
@@ -144,20 +152,22 @@ class Worker(object):
             return
 
         if len(self.time_states) >= self.window:
+            self.all_bars.append([bar.open, bar.high, bar.low, bar.close])
+            self.all_times.append(self.i_step)
 
             in_ = self.zeus.position_size()
             available_ = self.zeus.units_available()
             percent_in = (in_ / (abs(in_) + available_ + 1e-9)) / self.tradeable_percentage
 
+            # not normalizing using std to preserve volatility
             input_time_states = torch.Tensor(self.time_states[-self.window:]).view(self.window, 1, networks.D_BAR)
             mean = input_time_states[:, 0, :4].mean()
-            std = input_time_states[:, 0, :4].std()
-            input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) / std
+            input_time_states[:, 0, :4] = (input_time_states[:, 0, :4] - mean) * 10000 / mean
             assert torch.isnan(input_time_states).sum() == 0
-            spread_ = bar.spread / std
+            # spread = torch.Tensor(bar.spread) * 10000 / mean
 
             market_encoding = self.market_encoder(input_time_states)
-            market_encoding = self.encoder_to_others(market_encoding, torch.Tensor([spread_]), torch.Tensor([percent_in]))
+            market_encoding = self.encoder_to_others(market_encoding, torch.Tensor([bar.spread]), torch.Tensor([percent_in]))
             policy, value = self.actor_critic(market_encoding, temp=self.actor_temp)
 
             if self.test:
@@ -247,6 +257,7 @@ class Worker(object):
                 \nreward_ema: {ema} \
                 \nreward_emsd: {emsd} \
                 \nbar close: {close} \
+                \nwindow std: {std} \
                 \ninstrument: {ins} \
                 \nstart: {start}\n".format(s=self.i_step,
                                         p_in=round(percent_in_, 8),
@@ -258,6 +269,7 @@ class Worker(object):
                                         r=round(self.total_actual_reward, 5),
                                         ema=round(reward_ema, 5),
                                         emsd=round(reward_emsd, 5),
+                                        std=round(input_time_states[:, 0, :4].std().item(), 5),
                                         close=bar.close,
                                         ins=self.instrument,
                                         start=self.start))
@@ -271,7 +283,7 @@ class Worker(object):
                         print("emsd " + inst, self.server.get("test_emsd_" + inst).decode("utf-8"))
                         print()
 
-                if self.i_step % 100 == 0:
+                if self.i_step % 250 == 0:
                     try:
                         MEN_compressed_state_dict = self.server.get("market_encoder")
                         ETO_compressed_state_dict = self.server.get("encoder_to_others")
@@ -351,11 +363,11 @@ class Worker(object):
                     self.server.lpush("experience", experience)
                 self.steps_since_push = 1
 
-                # desired_percent_in = np.random.normal(0, 0.5)
-                # desired_percent_in *= self.tradeable_percentage
-                # desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
-                # place_action(desired_percent_in)
-                # self.prev_value = self.zeus.unrealized_balance()
+                desired_percent_in = np.random.normal(0, 0.5)
+                desired_percent_in *= self.tradeable_percentage
+                desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
+                place_action(desired_percent_in)
+                self.prev_value = self.zeus.unrealized_balance()
             else:
                 self.steps_since_push += 1
 
@@ -393,6 +405,12 @@ class Worker(object):
                 )
         )
 
+        # if self.test:
+        #     print(self.start, start)
+        #     import matplotlib.pyplot as plt
+        #     plt.plot(self.all_times, self.all_bars)
+        #     plt.show()
+
         if self.test:
             reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
             reward_ema = self.server.get("test_reward_ema")
@@ -417,12 +435,6 @@ class Worker(object):
                 delta = self.total_actual_reward - instrument_ema
                 self.server.set("test_ema_" + self.instrument, instrument_ema + instrument_tau * delta)
                 self.server.set("test_emsd_" + self.instrument, math.sqrt((1 - instrument_tau) * (instrument_emsd**2 + instrument_tau * (delta**2))))
-
-            # import matplotlib.pyplot as plt
-            # x = np.arange(0, len(self.all_time_states))
-            # y = np.array(self.all_time_states)
-            # plt.plot(x, y)
-            # plt.show()
 
         return self.total_actual_reward
 
