@@ -35,11 +35,18 @@ class Worker(object):
             if len(self.time_states) == self.window:
                 experience = Experience(time_states=self.time_states)
                 experience = msgpack.packb(experience, use_bin_type=True)
-                self.server.lpush("experience", experience)
-                # self.server.lpush("experience_dev", experience)
+                n_experiences = self.server.llen("experience")
+                try:
+                    loc = np.random.randint(0, n_experiences)
+                    ref = self.server.lindex("experience", loc)
+                    self.server.linsert("experience", "before", ref, experience)
+                except Exception as e:
+                    self.server.lpush("experience", experience)
+                # self.server.lpush("experience", experience)
                 self.n_sent += 1
 
-                del self.time_states[:30]
+                self.time_states = []
+
 
     def run(self):
         t0 = time.time()

@@ -1266,7 +1266,6 @@ class FCResLayer(nn.Module):
 
         x = self.dropout(x)
         x = self.fc_final(x)
-        x = F.leaky_relu(x)
 
         x = x + input
         x = self.ln(x)
@@ -1409,7 +1408,7 @@ class BarEmbedder(nn.Module):
     def __init__(self):
         super(BarEmbedder, self).__init__()
 
-        self.init_layer = nn.Linear(5, D_MODEL)
+        self.init_layer = nn.Linear(1, D_MODEL)
 
         self.n_res_layers = 2
         self.res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_res_layers)])
@@ -1446,31 +1445,35 @@ class GenDecoder(nn.Module):
         self.n_attn_layers = 4
         self.attn_layers = nn.ModuleList([DecoderLayer() for _ in range(self.n_attn_layers)])
 
-        self.d_encoding = 8
-        self.fc_mean = nn.Linear(D_MODEL, self.d_encoding)
-        self.fc_std = nn.Linear(D_MODEL, self.d_encoding)
+        self.n_fc_res_enc_layers = 2
+        self.fc_res_enc_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_fc_res_enc_layers)])
 
-        self.fc_gen_init = nn.Linear(self.d_encoding, D_MODEL)
-        self.n_fc_res_layers = 4
-        self.fc_res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_fc_res_layers)])
-        self.fc_gen_final = nn.Linear(D_MODEL, D_BAR)
+        self.d_encoding = 16
+        self.fc_enc = nn.Linear(D_MODEL, self.d_encoding)
+
+        self.fc_out_init = nn.Linear(self.d_encoding, D_MODEL)
+        self.n_fc_res_out_layers = 2
+        self.fc_res_out_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_fc_res_out_layers)])
+        self.fc_out_final = nn.Linear(D_MODEL, 1)
 
     def forward(self, input, output):
 
         for layer in self.attn_layers:
             output = layer(input, output)
 
-        enc_mean = self.fc_mean(output)
-        enc_std = torch.abs(self.fc_std(output) + 1e-5)
-        sample = torch.normal(torch.zeros_like(enc_mean), torch.ones_like(enc_std))
-        enc = (sample * enc_std) + enc_mean
+        for layer in self.fc_res_enc_layers:
+            output = layer(output)
 
-        gen = self.fc_gen_init(enc)
-        for layer in self.fc_res_layers:
+        enc = self.fc_enc(output)
+        noise = torch.normal(torch.zeros_like(enc), torch.ones_like(enc))
+        enc = enc + noise
+
+        gen = self.fc_out_init(enc)
+        for layer in self.fc_res_out_layers:
             gen = layer(gen)
-        gen = self.fc_gen_final(gen)
+        gen = self.fc_out_final(gen)
 
-        return gen, enc_mean, enc_std
+        return gen
 
 
 class Generator(nn.Module):
@@ -1479,7 +1482,8 @@ class Generator(nn.Module):
 
         self.n_future = 30
         self.bar_embedder = BarEmbedder()
-        self.pos_enc = nn.Parameter(torch.normal(torch.zeros(WINDOW + self.n_future, D_MODEL), torch.ones(WINDOW + self.n_future, D_MODEL) * 0.05))
+        self.pos_enc = nn.Parameter(torch.normal(torch.zeros(WINDOW + self.n_future, D_MODEL), torch.ones(WINDOW + self.n_future, D_MODEL)))
+        self.enc_ln = nn.LayerNorm(D_MODEL)
 
         self.gen_encoder = GenEncoder()
         self.gen_decoder = GenDecoder()
@@ -1492,44 +1496,38 @@ class Generator(nn.Module):
         batch_size = market_values.size()[0]
         input_seq_len = market_values.size()[1]
 
+        market_values = market_values[:, :, 3].view(batch_size, input_seq_len, 1)
         means = market_values.contiguous().view(batch_size, -1).mean(1).view(-1, 1, 1)
         stds = market_values.contiguous().view(batch_size, -1).std(1).view(-1, 1, 1)
         market_values = (market_values - means) / (stds + 1e-9)
 
-        market_values_shifted = torch.cat([market_values[:, 0, 0].view(batch_size, 1, 1), market_values[:, :-1, 3].view(batch_size, WINDOW - 1, 1)], dim=1)
-        market_values_ = torch.cat([market_values_shifted, market_values], dim=2)
+        # market_values_shifted = torch.cat([market_values[:, 0, 0].view(batch_size, 1, 1), market_values[:, :-1, 3].view(batch_size, WINDOW - 1, 1)], dim=1)
+        # market_values_ = torch.cat([market_values_shifted, market_values], dim=2)
 
-        input = self.bar_embedder(market_values_) + self.pos_enc[:WINDOW].repeat(batch_size, 1, 1)
+        input = self.bar_embedder(market_values) + self.pos_enc[:WINDOW].repeat(batch_size, 1, 1)
+        input = self.enc_ln(input)
         input = self.gen_encoder(input)
 
         generated = []
-        enc_means = []
-        enc_stds = []
         gen_enc = torch.zeros(batch_size, 1, D_MODEL)
         for i_gen in range(self.n_future):
-            gen, enc_mean, enc_std = self.gen_decoder(input, gen_enc)
-
-            enc_means.append(enc_mean[:, -1].view(batch_size, 1, -1))
-            enc_stds.append(enc_std[:, -1].view(batch_size, 1, -1))
+            gen = self.gen_decoder(input, gen_enc)
+            # print(gen[:, -1].mean(0))
 
             if i_gen == 0:
-                res = market_values[:, -1, 3].view(batch_size, 1, 1).repeat(1, 1, 4)
-                cur_gen_shifted = market_values[:, -1, 3].view(batch_size, 1, 1)
+                res = market_values[:, -1].view(batch_size, 1, 1)
             else:
-                res = generated[-1][:, :, 3].view(batch_size, 1, 1).repeat(1, 1, 4)
-                cur_gen_shifted = generated[-1][:, :, 3].view(batch_size, 1, 1)
+                res = generated[-1].view(batch_size, 1, 1)
 
-            cur_gen = gen[:, -1].view(batch_size, 1, D_BAR) + res
-            generated.append(cur_gen.view(batch_size, 1, D_BAR))
+            cur_gen = gen[:, -1].view(batch_size, 1, 1) + res
+            generated.append(cur_gen.view(batch_size, 1, 1))
 
-            cur_gen_ = torch.cat([cur_gen_shifted, cur_gen], dim=2)
-
-            gen_enc = torch.cat([gen_enc, (self.bar_embedder(cur_gen_) + self.pos_enc[WINDOW + i_gen].repeat(batch_size, 1, 1)).contiguous()], dim=1)
+            new_enc = (self.bar_embedder(cur_gen) + self.pos_enc[WINDOW + i_gen].repeat(batch_size, 1, 1))
+            new_enc = self.enc_ln(new_enc)
+            gen_enc = torch.cat([gen_enc, new_enc.contiguous()], dim=1)
 
         generated = torch.cat(generated, dim=1) * (stds + 1e-9) + means
-        enc_means = torch.cat(enc_means, dim=1)
-        enc_stds = torch.cat(enc_stds, dim=1)
-        return generated, enc_means, enc_stds
+        return generated
 
 
 class DiscEncoder(nn.Module):
@@ -1568,7 +1566,8 @@ class Discriminator(nn.Module):
 
         self.n_future = 30
         self.bar_embedder = BarEmbedder()
-        self.pos_enc = nn.Parameter(torch.normal(torch.zeros(WINDOW + self.n_future, D_MODEL), torch.ones(WINDOW + self.n_future, D_MODEL) * 0.05))
+        self.pos_enc = nn.Parameter(torch.normal(torch.zeros(WINDOW + self.n_future, D_MODEL), torch.ones(WINDOW + self.n_future, D_MODEL)))
+        self.enc_ln = nn.LayerNorm(D_MODEL)
 
         self.disc_encoder = DiscEncoder()
         self.disc_decoder = DiscDecoder()
@@ -1590,11 +1589,12 @@ class Discriminator(nn.Module):
         stds = inputs.contiguous().view(batch_size, -1).std(1).view(-1, 1, 1)
         inputs = (inputs - means) / (stds + 1e-9)
 
-        inputs_shifted = torch.cat([inputs[:, 0, 0].view(batch_size, 1, 1), inputs[:, :-1, 3].view(batch_size, WINDOW + self.n_future - 1, 1)], dim=1)
-        inputs_ = torch.cat([inputs_shifted, inputs], dim=2)
+        # inputs_shifted = torch.cat([inputs[:, 0, 0].view(batch_size, 1, 1), inputs[:, :-1, 3].view(batch_size, WINDOW + self.n_future - 1, 1)], dim=1)
+        # inputs_ = torch.cat([inputs_shifted, inputs], dim=2)
 
-        inputs_ = self.bar_embedder(inputs_) + self.pos_enc.repeat(batch_size, 1, 1)
-        encoding = self.disc_encoder(inputs_)
+        inputs = self.bar_embedder(inputs) + self.pos_enc.repeat(batch_size, 1, 1)
+        inputs = self.enc_ln(inputs)
+        encoding = self.disc_encoder(inputs)
 
         output = torch.zeros(batch_size, 1, D_MODEL)
         disc = self.disc_decoder(encoding, output)

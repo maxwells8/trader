@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 15:
+            while process.is_alive() and time.time() - times[i] < 60:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -72,7 +72,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 # if server.llen("experience_dev") < 32:
-                if server.llen("experience") < 100000:
+                if server.llen("experience") < 1000:
                     processes[i] = start_process(i)
                     times[i] = time.time()
                     started = True

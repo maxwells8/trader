@@ -84,6 +84,8 @@ class Optimizer(object):
         self.n_samples = self.start_n_samples
         self.step = self.start_step
 
+        self.n_disc_to_gen_steps = 1
+
         n = 0
         for param in self.generator.parameters():
             n += np.prod(param.size())
@@ -94,7 +96,6 @@ class Optimizer(object):
         print("discriminator parameters:", n)
 
         self.batch_size = int(self.server.get("queued_batch_size").decode("utf-8"))
-        self.KL_coef = float(self.server.get("KL_coef").decode("utf-8"))
 
         self.window = networks.WINDOW
 
@@ -149,50 +150,42 @@ class Optimizer(object):
             for i, time_state_ in enumerate(time_states):
                 time_states[i] = torch.Tensor(time_state_).view(batch_size, 1, networks.D_BAR)
 
-            total_loss = torch.Tensor([0])
-            loss = torch.Tensor([0])
-            kl_loss = torch.Tensor([0])
-
             input_time_states = torch.cat(time_states[:self.window], dim=1).cuda()
 
             next_time_states = torch.cat(time_states[self.window:], dim=1).cuda()
             n_future = next_time_states.size()[1]
 
-            generation, enc_means, enc_stds = self.generator(input_time_states[:(batch_size // 2)])
+            generation = self.generator(input_time_states[:(batch_size // 2)])
 
-            queried = torch.cat([generation, next_time_states[(batch_size // 2):]], dim=0)
-            discrimination = self.discriminator(input_time_states, queried)
+            queried = torch.cat([generation, next_time_states[(batch_size // 2):, :, 3].view((batch_size // 2), -1, 1)], dim=0)
+            discrimination = self.discriminator(input_time_states[:, :, 3].view(batch_size, -1, 1), queried)
 
             discriminator_loss = self.loss(discrimination, torch.cat([torch.zeros(batch_size // 2, 1), torch.ones(batch_size // 2, 1)], 0))
 
-            discriminator_loss.backward(retain_graph=True)
+            if self.step % self.n_disc_to_gen_steps == 0:
+                discriminator_loss.backward(retain_graph=True)
+            else:
+                discriminator_loss.backward(retain_graph=False)
             self.discriminator_optimizer.step()
 
             self.generator_optimizer.zero_grad()
             generator_loss = self.loss(discrimination[:(batch_size // 2)], torch.ones(batch_size // 2, 1))
-            kl_loss = 0.5 * torch.mean(torch.pow(enc_stds, 2) + torch.pow(enc_means, 2) - torch.log(1e-5 + torch.pow(enc_stds, 2)) - 1)
-            gen_total_loss = generator_loss + self.KL_coef * kl_loss
 
-            gen_total_loss.backward(retain_graph=False)
-            self.generator_optimizer.step()
-
-            self.step += 1
-            self.n_samples += n_experiences
+            if self.step % self.n_disc_to_gen_steps == 0:
+                generator_loss.backward(retain_graph=False)
+                self.generator_optimizer.step()
 
             if self.step % 10 == 0:
-                print("std(encoding mean):", enc_means.std().cpu().detach().numpy())
-                print("std(encoding std):", enc_stds.std().cpu().detach().numpy())
                 print("generation mean:", generation.view(-1, D_BAR).mean(0).cpu().detach().numpy())
                 print("actual mean:", next_time_states.view(-1, D_BAR).mean(0).cpu().detach().numpy())
                 print("sample generation:", generation[0][0].cpu().detach().numpy())
-                print("sample actual:", next_time_states[0][0].cpu().detach().numpy())
+                print("sample actual:", next_time_states[0][0][-3].cpu().detach().numpy())
                 print("sample discrimination:", discrimination[0][0].cpu().detach().numpy())
-            print("step: {step}, n_samples: {n_samples}, time: {time}, dis_target: {dis_target}, dis_gen: {dis_gen}, kl_loss: {kl_loss}, gen_loss: {gen_loss}, dis_loss: {dis_loss}".format(step=self.step,
+            print("step: {step}, n_samples: {n_samples}, time: {time}, dis_target: {dis_target}, dis_gen: {dis_gen}, gen_loss: {gen_loss}, dis_loss: {dis_loss}".format(step=self.step,
                 n_samples=self.n_samples,
                 time=round(time.time() - t0, 5),
                 dis_target=round(discrimination[(batch_size // 2):].mean().item(), 5),
                 dis_gen=round(discrimination[:(batch_size // 2)].mean().item(), 5),
-                kl_loss=round(kl_loss.cpu().item(), 5),
                 gen_loss=round(generator_loss.cpu().item(), 5),
                 dis_loss=round(discriminator_loss.cpu().item(), 5)))
             print('-----------------------------------------------------------------------')
@@ -232,3 +225,7 @@ class Optimizer(object):
                     print(e)
                     assert False
                     print("failed to save")
+
+
+            self.step += 1
+            self.n_samples += n_experiences
