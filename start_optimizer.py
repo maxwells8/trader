@@ -40,8 +40,8 @@ server_host = "192.168.0.115"
 server = redis.Redis(server_host)
 
 server.set("queued_batch_size", 64)
-server.set("learning_rate", 1e-5)
-server.set("weight_penalty", 1e-5)
+server.set("learning_rate", 1e-4)
+server.set("weight_penalty", 1e-4)
 
 import os
 dir_path = os.path.dirname(os.path.realpath(__file__))

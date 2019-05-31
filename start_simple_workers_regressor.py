@@ -16,8 +16,8 @@ if __name__ == "__main__":
     server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     n_workers = 24
-    instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
-    # instruments = ["EUR_USD"]
+    # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
+    instruments = ["EUR_USD"]
     inst_i = 0
 
     # start_start = 1341446400
@@ -26,19 +26,21 @@ if __name__ == "__main__":
         global inst_i
         # global start_start
 
-        granularity = "M1"
+        granularity = "M5"
 
-        start = np.random.randint(1136073600, 1548374400)
-        # start = np.random.randint(1546819200, 1547446980)
-        # start = np.random.randint(1546819200, 1546923420)
-        # start = 1546819200
+        # start = np.random.randint(1136073600, 1548374400)
+        start = np.random.randint(1514764800, 1546300800)
+        # start = 1546300800
+        # start = 1546450500 - (60 * (120 + 100))
         # start = start_start
         # start_start += 86400 * 7
+
+        max_time = 1546300800
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 
-        process = multiprocessing.Process(target=start_worker, args=(instrument, granularity, server_host, start))
+        process = multiprocessing.Process(target=start_worker, args=(instrument, granularity, server_host, start, max_time))
         process.start()
 
         print("starting worker {n}".format(n=n))
@@ -53,7 +55,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 60:
+            while process.is_alive() and time.time() - times[i] < 10:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -72,7 +74,7 @@ if __name__ == "__main__":
             started = False
             while not started:
                 # if server.llen("experience_dev") < 32:
-                if server.llen("experience") < 1000:
+                if server.llen("experience") < 10000:
                     processes[i] = start_process(i)
                     times[i] = time.time()
                     started = True

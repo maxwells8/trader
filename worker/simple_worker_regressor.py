@@ -10,20 +10,27 @@ from zeus.zeus import Zeus
 
 class Worker(object):
 
-    def __init__(self, instrument, granularity, server_host, start):
+    def __init__(self, instrument, granularity, server_host, start, max_time):
         self.server = redis.Redis(server_host)
         self.zeus = Zeus(instrument, granularity)
 
-        self.window = networks.WINDOW + 30
+        self.window = networks.WINDOW + 10
         self.start = start
 
         self.time_states = []
         self.last_time = None
+        self.max_time = max_time
 
+        self.max_sent = 100
         self.n_sent = 0
 
+        self.t0 = 0
+
     def add_bar(self, bar):
-        time_state = [[[bar.open, bar.high, bar.low, bar.close]]]
+        if self.n_sent == self.max_sent or bar.date > self.max_time:
+            print("experiences sent: {n_sent}, time: {time}".format(n_sent=self.n_sent, time=time.time()-self.t0))
+            quit()
+        time_state = [bar.open, bar.high, bar.low, bar.close]
 
         if bar.date != self.last_time:
             self.time_states.append(time_state)
@@ -45,17 +52,17 @@ class Worker(object):
                 # self.server.lpush("experience", experience)
                 self.n_sent += 1
 
-                self.time_states = []
-
+                # self.time_states = []
+                del self.time_states[0]
 
     def run(self):
-        t0 = time.time()
+        self.t0 = time.time()
         start = self.start
-        n_seconds = (self.window - len(self.time_states) + (100 - self.n_sent)) * 60 * 100
-        self.zeus.stream_range(start, start + n_seconds, self.add_bar)
-        start += n_seconds
+        while self.n_sent < self.max_sent:
+            n_seconds = (self.window - len(self.time_states) + (self.max_sent - self.n_sent)) * 60 * 5
+            self.zeus.stream_range(start, start + n_seconds, self.add_bar)
+            start += n_seconds
 
-        print(self.n_sent)
-        print("time: {time}".format(time=time.time()-t0))
+        print("experiences sent: {n_sent}, time: {time}".format(n_sent=self.n_sent, time=time.time()-self.t0))
 
 Experience = namedtuple('Experience', ('time_states'))
