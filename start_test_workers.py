@@ -35,10 +35,8 @@ if __name__ == "__main__":
         name = "test" + name
         global n_times
         global inst_i
-        # start = np.random.randint(1136073600, 1548374400)
-        # start = np.random.randint(1546819200, 1546819200 + (1440 * 60 * 4))
-        start = 1546819200
-        # start = 1546819200 + (1440 * 60 * 4)
+        start = 1546300800
+
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 

@@ -10,7 +10,7 @@ torch.manual_seed(0)
 D_BAR = 4
 D_MODEL = 512
 WINDOW = 240
-P_DROPOUT = 0.5
+P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -1122,87 +1122,73 @@ class ProposerGate(nn.Module):
         return p
 
 
+class Encoder(nn.Module):
+    def __init__(self):
+        super(Encoder, self).__init__()
+
+        self.fc_init = nn.Linear(WINDOW + 2, D_MODEL)
+        # self.ln_init = nn.LayerNorm(D_MODEL)
+
+        self.n_res_layers = 2
+        self.res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_res_layers)])
+
+    def forward(self, market_values, spread, percent_in):
+        """
+        market_values of size (batch_size, WINDOW, D_BAR)
+        """
+        batch_size = market_values.size()[0]
+
+        market_values_ = market_values[:, :, 3]
+        spread_ = spread.view(batch_size, 1)
+        percent_in_ = percent_in.view(batch_size, 1)
+
+        means = market_values_.contiguous().view(batch_size, -1).mean(1).view(-1, 1)
+        stds = market_values_.contiguous().view(batch_size, -1).std(1).view(-1, 1)
+        market_values_ = (market_values_ - means) / (stds + 1e-9)
+        spread_ = spread_ / (stds + 1e-9)
+
+        x = torch.cat([market_values_, spread_, percent_in_], dim=1)
+
+        x = self.fc_init(x)
+        # x = self.ln_init(x)
+        x = F.leaky_relu(x)
+
+        for layer in self.res_layers:
+            x = layer(x)
+
+        return x
+
+
 class ActorCritic(nn.Module):
-    """
-    takes a market encoding (which also includes the percentage of balance
-    already in a trade) and a proposed action, and outputs the policy (buy,
-    sell, keep), and the value of the current state
-    """
 
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 11
-        self.dropout = nn.Dropout(P_DROPOUT)
-
-        self.combined_initial = nn.Linear(D_MODEL, D_MODEL)
-        # self.combined_initial_bn = nn.BatchNorm1d(D_MODEL)
-        self.n_combined_layers = 0
-        self.combined_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_combined_layers)])
-        # self.combined_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_combined_layers)])
-        for i in range(self.n_combined_layers):
-            nn.init.normal_(self.combined_layers[i].weight, mean=0, std=math.sqrt(1 / (self.n_combined_layers * D_MODEL)))
-            nn.init.normal_(self.combined_layers[i].bias, mean=0, std=math.sqrt(1 / (self.n_combined_layers * D_MODEL)))
+        self.d_action = 3
 
         self.n_actor_layers = 0
-        self.actor_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_actor_layers)])
-        # self.actor_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_actor_layers)])
-        self.actor_out = nn.Linear(D_MODEL, self.d_action)
+        self.actor_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_actor_layers)])
+        self.final_actor = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
-        for i in range(self.n_actor_layers):
-            nn.init.normal_(self.actor_layers[i].weight, mean=0, std=math.sqrt(1 / (self.n_actor_layers * D_MODEL)))
-            nn.init.normal_(self.actor_layers[i].bias, mean=0, std=math.sqrt(1 / (self.n_actor_layers * D_MODEL)))
 
         self.n_critic_layers = 0
-        self.critic_layers = nn.ModuleList([nn.Linear(D_MODEL, D_MODEL) for _ in range(self.n_critic_layers)])
-        # self.critic_bns = nn.ModuleList([nn.BatchNorm1d(D_MODEL) for _ in range(self.n_critic_layers)])
-        self.critic_out = nn.Linear(D_MODEL, 1)
-        for i in range(self.n_critic_layers):
-            nn.init.normal_(self.critic_layers[i].weight, mean=0, std=math.sqrt(1 / (self.n_critic_layers * D_MODEL)))
-            nn.init.normal_(self.critic_layers[i].bias, mean=0, std=math.sqrt(1 / (self.n_critic_layers * D_MODEL)))
+        self.critic_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_critic_layers)])
+        self.final_critic = nn.Linear(D_MODEL, 1)
 
     def forward(self, market_encoding, temp=1):
 
-        x = market_encoding.view(-1, D_MODEL)
-        x = self.combined_initial(x)
-        # x = self.combined_initial_bn(x)
-        x = F.leaky_relu(x)
-        for i in range(self.n_combined_layers):
-            if i % 2 == 0:
-                res = x
-            x = self.dropout(x)
-            x = self.combined_layers[i](x)
-            # x = self.combined_bns[i](x)
-            if i % 2 == 1:
-                x = x + res
-            x = F.leaky_relu(x)
+        x = market_encoding
 
         policy = x
-        for i in range(self.n_actor_layers):
-            if i % 2 == 0:
-                res = policy
-            policy = self.dropout(policy)
-            policy = self.actor_layers[i](policy)
-            # policy = self.actor_bns[i](policy)
-            if i % 2 == 1:
-                policy = policy + res
-            policy = F.leaky_relu(policy)
-
-        policy_ = self.actor_out(policy) / temp
-        policy = self.actor_softmax(policy_)
+        for layer in self.actor_layers:
+            policy = layer(policy)
+        policy = self.final_actor(policy) / temp
+        policy = self.actor_softmax(policy)
 
         critic = x
-        for i in range(self.n_critic_layers):
-            if i % 2 == 0:
-                res = critic
-            critic = self.dropout(critic)
-            critic = self.critic_layers[i](critic)
-            # critic = self.critic_bns[i](critic)
-            if i % 2 == 1:
-                critic = critic + res
-            critic = F.leaky_relu(critic)
-
-        critic = self.critic_out(critic)
+        for layer in self.critic_layers:
+            critic = layer(critic)
+        critic = self.final_critic(x)
 
         return policy, critic
 
@@ -1254,7 +1240,7 @@ class FCResLayer(nn.Module):
         self.fc_init = nn.Linear(D_MODEL, self.intermediate_size)
         self.fc_final = nn.Linear(self.intermediate_size, D_MODEL)
 
-        self.ln = nn.LayerNorm(D_MODEL)
+        # self.ln = nn.LayerNorm(D_MODEL)
 
         self.dropout = nn.Dropout(P_DROPOUT)
 
@@ -1272,7 +1258,7 @@ class FCResLayer(nn.Module):
         x = self.fc_final(x)
 
         x = x + input
-        x = self.ln(x)
+        # x = self.ln(x)
 
         return x
 

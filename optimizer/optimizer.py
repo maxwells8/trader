@@ -98,7 +98,7 @@ class Optimizer(object):
 
             self.start_step = 0
             self.start_n_samples = 0
-            self.original_actor_temp = 5
+            self.original_actor_temp = 1
             cur_meta_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
@@ -203,14 +203,10 @@ class Optimizer(object):
             actor_entropy_loss = torch.Tensor([0]).cuda()
 
             time_states_ = torch.cat(time_states[self.trajectory_steps:], dim=1).detach().cuda()
-            mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
-            time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) * 10000 / mean
-            spread_ = torch.Tensor(spread[self.trajectory_steps-1]).view(-1, 1, 1).cuda()
-            # spread = spread_ * 10000 / mean
-            time_states_ = time_states_.transpose(0, 1)
+            spread_ = torch.Tensor(spread[self.trajectory_steps-1]).cuda()
+            percent_in_ = torch.Tensor(percent_in[self.trajectory_steps-1]).cuda()
 
-            market_encoding = self.MEN.forward(time_states_)
-            market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[self.trajectory_steps-1]).cuda())
+            market_encoding = self.MEN.forward(time_states_, spread_, percent_in_)
             policy, value = self.ACN.forward(market_encoding)
 
             v_next = value.detach()
@@ -218,14 +214,10 @@ class Optimizer(object):
             for i in range(self.trajectory_steps - 2, -1, -1):
 
                 time_states_ = torch.cat(time_states[i+1:window+i+1], dim=1).cuda()
-                mean = time_states_[:, :, :4].contiguous().view(batch_size, 4 * window).mean(1).view(batch_size, 1, 1)
-                time_states_[:, :, :4] = (time_states_[:, :, :4] - mean) * 10000 / mean
-                spread_ = torch.Tensor(spread[i]).view(-1, 1, 1).cuda()
-                # spread = spread_ * 10000 / mean
-                time_states_ = time_states_.transpose(0, 1)
+                spread_ = torch.Tensor(spread[i]).cuda()
+                percent_in_ = torch.Tensor(percent_in[i]).cuda()
 
-                market_encoding = self.MEN.forward(time_states_)
-                market_encoding = self.ETO.forward(market_encoding, spread_, torch.Tensor(percent_in[i]).cuda())
+                market_encoding = self.MEN.forward(time_states_, spread_, percent_in_)
                 policy, value = self.ACN.forward(market_encoding)
 
                 pi_ = policy.gather(1, torch.Tensor(place_action[i]).cuda().long().view(batch_size, 1))
@@ -235,21 +227,14 @@ class Optimizer(object):
 
                 if i == 0:
                     rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9))
-                    # rho = torch.ones_like(rho)
 
                     advantage_v = r + self.gamma * v_trace - value
                     actor_v_loss += (-torch.log(pi_ + 1e-9) * (rho * advantage_v).detach()).mean()
 
-                    # q = r + self.gamma * v_trace
-                    # actor_v_loss += (-torch.log(pi_ + 1e-9) * (rho * q).detach()).mean()
-
                     actor_entropy_loss += (torch.log(policy + 1e-9) * policy).mean()
 
                 rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9))
-                # rho = torch.ones_like(rho)
-
                 c = torch.min(self.max_c, pi_ / (mu_ + 1e-9))
-                # c = torch.ones_like(c)
                 delta_v = rho * (r + self.gamma * v_next - value)
 
                 v_trace = (value + delta_v + self.gamma * c * (v_trace - v_next)).detach()
@@ -291,27 +276,22 @@ class Optimizer(object):
                     }
 
                     MEN_state_dict_buffer = io.BytesIO()
-                    ETO_state_dict_buffer = io.BytesIO()
                     ACN_state_dict_buffer = io.BytesIO()
                     meta_state_buffer = io.BytesIO()
 
                     torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
-                    torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
                     torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
                     torch.save(cur_meta_state, meta_state_buffer)
 
                     MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
-                    ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
                     ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
                     meta_state_compressed = pickle.dumps(meta_state_buffer)
 
                     self.server.set("market_encoder", MEN_state_dict_compressed)
-                    self.server.set("encoder_to_others", ETO_state_dict_compressed)
                     self.server.set("actor_critic", ACN_state_dict_compressed)
                     self.server.set("meta_state", meta_state_compressed)
 
                     torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
-                    torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
                     torch.save(self.ACN.state_dict(), self.models_loc + "actor_critic.pt")
                     torch.save(cur_meta_state, self.models_loc + 'rl_train.pt')
             except Exception:
@@ -324,7 +304,6 @@ class Optimizer(object):
                     if not os.path.exists(self.models_loc + 'model_history/{step}'.format(step=self.step)):
                         os.makedirs(self.models_loc + 'model_history/{step}'.format(step=self.step))
                     torch.save(self.MEN.state_dict(), self.models_loc + 'model_history/{step}/market_encoder.pt'.format(step=self.step))
-                    torch.save(self.ETO.state_dict(), self.models_loc + 'model_history/{step}/encoder_to_others.pt'.format(step=self.step))
                     torch.save(self.ACN.state_dict(), self.models_loc + "model_history/{step}/actor_critic.pt".format(step=self.step))
                     cur_meta_state = {
                         'n_samples':n_samples,
@@ -335,22 +314,18 @@ class Optimizer(object):
                     torch.save(cur_meta_state, self.models_loc + 'model_history/{step}/rl_train.pt'.format(step=self.step))
 
                     MEN_state_dict_buffer = io.BytesIO()
-                    ETO_state_dict_buffer = io.BytesIO()
                     ACN_state_dict_buffer = io.BytesIO()
                     meta_state_buffer = io.BytesIO()
 
                     torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
-                    torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
                     torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
                     torch.save(cur_meta_state, meta_state_buffer)
 
                     MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
-                    ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
                     ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
                     meta_state_compressed = pickle.dumps(meta_state_buffer)
 
                     self.server.set("market_encoder", MEN_state_dict_compressed)
-                    self.server.set("encoder_to_others", ETO_state_dict_compressed)
                     self.server.set("actor_critic", ACN_state_dict_compressed)
                     self.server.set("meta_state", meta_state_compressed)
 
@@ -365,6 +340,7 @@ class Optimizer(object):
 
             print('-----------------------------------------------------------')
             print("n samples: {n}, batch size: {b}, steps: {s}, time: {t}".format(n=n_samples, b=batch_size, s=self.step, t=round(time.time()-t0, 5)))
+            print("actor temp: {at}".format(at=self.actor_temp))
             print()
 
             print("policy means:", policy.cpu().detach().mean(dim=0))
