@@ -20,20 +20,13 @@ if __name__ == "__main__":
     instruments = ["EUR_USD"]
     inst_i = 0
 
-    # start_start = 1341446400
     n_workers_total = 0
     def start_process(n):
         global inst_i
-        # global start_start
 
-        granularity = "M5"
+        granularity = "M1"
 
-        # start = np.random.randint(1136073600, 1548374400)
         start = np.random.randint(1514764800, 1546300800)
-        # start = 1546300800
-        # start = 1546450500 - (60 * (120 + 100))
-        # start = start_start
-        # start_start += 86400 * 7
 
         max_time = 1546300800
 
@@ -55,7 +48,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 10:
+            while process.is_alive() and time.time() - times[i] < 15:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
@@ -73,7 +66,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                # if server.llen("experience_dev") < 32:
+                # if server.llen("experience_dev") < 1:
                 if server.llen("experience") < 10000:
                     processes[i] = start_process(i)
                     times[i] = time.time()

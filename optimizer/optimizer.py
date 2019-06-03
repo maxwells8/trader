@@ -32,35 +32,28 @@ class Optimizer(object):
         self.weight_penalty = float(self.server.get("weight_penalty").decode("utf-8"))
         self.learning_rate = float(self.server.get("learning_rate").decode("utf-8"))
 
-        self.MEN = LSTMEncoder().cuda()
-        self.ETO = EncoderToOthers().cuda()
+        self.MEN = Encoder().cuda()
         self.ACN = ActorCritic().cuda()
 
         self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
-                                    [param for param in self.ETO.parameters()] +
                                     [param for param in self.ACN.parameters()],
                                     lr=self.learning_rate,
                                     weight_decay=self.weight_penalty)
         try:
             # models
             self.MEN.load_state_dict(torch.load(self.models_loc + 'market_encoder.pt'))
-            self.ETO.load_state_dict(torch.load(self.models_loc + 'encoder_to_others.pt'))
             self.ACN.load_state_dict(torch.load(self.models_loc + 'actor_critic.pt'))
 
             MEN_state_dict_buffer = io.BytesIO()
-            ETO_state_dict_buffer = io.BytesIO()
             ACN_state_dict_buffer = io.BytesIO()
 
             torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
-            torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
             torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
 
             MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
-            ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
             ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
 
             self.server.set("market_encoder", MEN_state_dict_compressed)
-            self.server.set("encoder_to_others", ETO_state_dict_compressed)
             self.server.set("actor_critic", ACN_state_dict_compressed)
 
             # optimizer
@@ -79,33 +72,26 @@ class Optimizer(object):
 
         except (FileNotFoundError, AssertionError) as e:
             # models
-            self.MEN = LSTMEncoder().cuda()
-            self.ETO = EncoderToOthers().cuda()
+            self.MEN = Encoder().cuda()
             self.ACN = ActorCritic().cuda()
 
             MEN_state_dict_buffer = io.BytesIO()
-            ETO_state_dict_buffer = io.BytesIO()
             ACN_state_dict_buffer = io.BytesIO()
 
             torch.save(self.MEN.state_dict(), MEN_state_dict_buffer)
-            torch.save(self.ETO.state_dict(), ETO_state_dict_buffer)
             torch.save(self.ACN.state_dict(), ACN_state_dict_buffer)
 
             MEN_state_dict_compressed = pickle.dumps(MEN_state_dict_buffer)
-            ETO_state_dict_compressed = pickle.dumps(ETO_state_dict_buffer)
             ACN_state_dict_compressed = pickle.dumps(ACN_state_dict_buffer)
 
             self.server.set("market_encoder", MEN_state_dict_compressed)
-            self.server.set("encoder_to_others", ETO_state_dict_compressed)
             self.server.set("actor_critic", ACN_state_dict_compressed)
 
             torch.save(self.MEN.state_dict(), self.models_loc + 'market_encoder.pt')
-            torch.save(self.ETO.state_dict(), self.models_loc + 'encoder_to_others.pt')
             torch.save(self.ACN.state_dict(), self.models_loc + 'actor_critic.pt')
 
             # optimizer
             self.optimizer = optim.Adam([param for param in self.MEN.parameters()] +
-                                        [param for param in self.ETO.parameters()] +
                                         [param for param in self.ACN.parameters()],
                                         lr=self.learning_rate,
                                         weight_decay=self.weight_penalty)
@@ -148,7 +134,6 @@ class Optimizer(object):
 
     def run(self):
         self.MEN.train()
-        self.ETO.train()
         self.ACN.train()
 
         n_samples = self.start_n_samples

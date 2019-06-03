@@ -36,33 +36,30 @@ sys.path.insert(0, './optimizer')
 
 
 # -------------------------------------------------------------------
-server_host = "192.168.0.115"
-server = redis.Redis(server_host)
-
-server.set("queued_batch_size", 64)
-server.set("learning_rate", 1e-4)
-server.set("weight_penalty", 1e-4)
-
-import os
-dir_path = os.path.dirname(os.path.realpath(__file__))
-
-import encoder_decoder_regressor
-encoder_decoder_regressor.Optimizer(dir_path + '/models/', server_host).run()
-
-# -------------------------------------------------------------------
 # server_host = "192.168.0.115"
 # server = redis.Redis(server_host)
 #
-# server.set("n_steps_future", 10)
-# server.set("required_change", 0.0005)
-#
-# server.set("batch_size", 32)
-# server.set("learning_rate", 0.0001)
-# server.set("weight_penalty", 0.0001)
-# server.set("KL_coef", 1)
+# server.set("queued_batch_size", 64)
+# server.set("learning_rate", 1e-4)
+# server.set("weight_penalty", 1e-4)
 #
 # import os
 # dir_path = os.path.dirname(os.path.realpath(__file__))
 #
-# import encoder_decoder_classifier
-# encoder_decoder_classifier.Optimizer(dir_path + '/models/', server_host).run()
+# import encoder_decoder_regressor
+# encoder_decoder_regressor.Optimizer(dir_path + '/models/', server_host).run()
+
+# -------------------------------------------------------------------
+server_host = "192.168.0.115"
+server = redis.Redis(server_host)
+
+server.set("batch_size", 32)
+server.set("learning_rate", 1e-4)
+server.set("weight_penalty", 1e-4)
+server.set("KL_coef", 1)
+
+import os
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
+import encoder_decoder_classifier
+encoder_decoder_classifier.Optimizer(dir_path + '/models/', server_host).run()

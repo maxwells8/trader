@@ -49,17 +49,16 @@ class Worker(object):
                     self.server.linsert("experience", "before", ref, experience)
                 except Exception as e:
                     self.server.lpush("experience", experience)
-                # self.server.lpush("experience", experience)
                 self.n_sent += 1
 
                 # self.time_states = []
-                del self.time_states[0]
+                del self.time_states[:10]
 
     def run(self):
         self.t0 = time.time()
         start = self.start
         while self.n_sent < self.max_sent:
-            n_seconds = (self.window - len(self.time_states) + (self.max_sent - self.n_sent)) * 60 * 5
+            n_seconds = (self.window - len(self.time_states) + (self.max_sent - self.n_sent)) * 60 * 10
             self.zeus.stream_range(start, start + n_seconds, self.add_bar)
             start += n_seconds
 

@@ -30,10 +30,8 @@ if __name__ == "__main__":
     def start_process(name, n):
         global inst_i
         # start = np.random.randint(1136073600, 1548374400)
-        start = np.random.randint(1546819200, 1547446980 - (networks.WINDOW * 60))
-        # start = 1546819200
-        # start = 1546923420 - (networks.WINDOW * 60) # 1440
-        # start = 1547446980 - (networks.WINDOW * 60) # 7200
+        start = np.random.randint(1546819200, 1547446980)
+
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
 
@@ -69,7 +67,7 @@ if __name__ == "__main__":
 
             started = False
             while not started:
-                if server.llen("experience") < 256:
+                if server.llen("experience") < 1000:
                     processes[i] = start_process(str(i), i)
                     times[i] = time.time()
                     started = True

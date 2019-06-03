@@ -10,7 +10,7 @@ torch.manual_seed(0)
 D_BAR = 4
 D_MODEL = 512
 WINDOW = 240
-P_DROPOUT = 0.1
+P_DROPOUT = 0.5
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -1737,7 +1737,7 @@ class Discriminator(nn.Module):
 
     def forward(self, market_values, query):
         """
-        market_values of size (batch_size, seq_len, D_BAR)
+        market_values of size (batch_size, seq_len)
         """
         device = market_values.device
         batch_size = market_values.size()[0]
@@ -1758,3 +1758,39 @@ class Discriminator(nn.Module):
         disc = torch.sigmoid(disc)
 
         return disc
+
+
+class Network(nn.Module):
+    def __init__(self):
+        super(Network, self).__init__()
+
+        self.init_fc = nn.Linear(WINDOW, D_MODEL)
+        self.init_ln = nn.LayerNorm(D_MODEL)
+
+        self.n_res = 2
+        self.res_layers = nn.Sequential(*nn.ModuleList([FCResLayer() for _ in range(self.n_res)]))
+        self.final_fc = nn.Linear(D_MODEL, 3)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, market_values):
+        """
+        market_values of size (batch_size, seq_len, D_BAR)
+        """
+        device = market_values.device
+        batch_size = market_values.size()[0]
+        seq_len = market_values.size()[1]
+
+        inputs = market_values[:, :, 3].view(batch_size, seq_len)
+        mean = inputs.contiguous().view(batch_size, -1).mean(1).view(-1, 1)
+        std = inputs.contiguous().view(batch_size, -1).std(1).view(-1, 1)
+        inputs = (inputs - mean) / (std + 1e-9)
+
+        x = self.init_fc(inputs)
+        x = self.init_ln(x)
+
+        x = self.res_layers(x)
+
+        x = self.final_fc(x)
+        x = self.softmax(x)
+
+        return x, inputs[:, -1].view(batch_size, 1), mean, std

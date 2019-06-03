@@ -46,7 +46,7 @@ class Worker(object):
         # for name, param in self.generator.named_parameters():
         #     print(param.std(), name)
 
-        self.n_future_samples = 100
+        self.n_future_samples = 1
         self.n_steps_future = 10
 
         self.plot = 1
@@ -109,12 +109,15 @@ class Worker(object):
                     else:
                         plt.plot(x, y, 'y-', alpha=0.1)
 
-                input_mean = input_time_states_original.mean().item()
-                plt.plot(np.arange(0, self.window + self.n_steps_future), np.zeros(self.window + self.n_steps_future) + input_mean, 'r', alpha=0.1)
-
                 predicted_future = generation[:, -1].mean().item()
                 actual_future = self.time_states[-1][3]
                 original = input_time_states[self.window-1][0, 0, 3].item()
+
+                input_mean = input_time_states_original.mean().item()
+                input_std = input_time_states_original.std().item()
+                plt.plot(np.arange(0, self.window + self.n_steps_future), np.zeros(self.window + self.n_steps_future) + input_mean, 'r', alpha=0.1)
+                plt.plot(np.arange(0, self.window + self.n_steps_future), np.zeros(self.window + self.n_steps_future) + original + (0.25 * input_std), 'y', alpha=0.1)
+                plt.plot(np.arange(0, self.window + self.n_steps_future), np.zeros(self.window + self.n_steps_future) + original - (0.25 * input_std), 'y', alpha=0.1)
 
                 # my_pred = input("b/s/h: ")
                 # if (my_pred == 'b' and actual_future > original) or (my_pred == 's' and actual_future < original):
@@ -147,8 +150,8 @@ class Worker(object):
                 if self.plot:
                     plt.show()
 
-                del self.time_states[:self.n_steps_future]
-                # self.time_states = []
+                # del self.time_states[:self.n_steps_future]
+                self.time_states = []
 
         self.last_time = bar.date
         self.step += 1

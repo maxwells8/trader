@@ -36,25 +36,20 @@ class Worker(object):
 
         while True:
             if not test:
-                self.market_encoder = LSTMEncoder().cpu()
-                self.encoder_to_others = EncoderToOthers().cpu()
+                self.market_encoder = Encoder().cpu()
                 self.actor_critic = ActorCritic().cpu()
 
                 try:
                     MEN_compressed_state_dict = self.server.get("market_encoder")
-                    ETO_compressed_state_dict = self.server.get("encoder_to_others")
                     ACN_compressed_state_dict = self.server.get("actor_critic")
 
                     MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
-                    ETO_state_dict_buffer = pickle.loads(ETO_compressed_state_dict)
                     ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
 
                     MEN_state_dict_buffer.seek(0)
-                    ETO_state_dict_buffer.seek(0)
                     ACN_state_dict_buffer.seek(0)
 
                     self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cpu'))
-                    self.encoder_to_others.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cpu'))
                     self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cpu'))
 
                     break
@@ -64,23 +59,18 @@ class Worker(object):
 
             else:
                 self.market_encoder = LSTMEncoder().cuda()
-                self.encoder_to_others = EncoderToOthers().cuda()
                 self.actor_critic = ActorCritic().cuda()
                 try:
                     MEN_compressed_state_dict = self.server.get("market_encoder")
-                    ETO_compressed_state_dict = self.server.get("encoder_to_others")
                     ACN_compressed_state_dict = self.server.get("actor_critic")
 
                     MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
-                    ETO_state_dict_buffer = pickle.loads(ETO_compressed_state_dict)
                     ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
 
                     MEN_state_dict_buffer.seek(0)
-                    ETO_state_dict_buffer.seek(0)
                     ACN_state_dict_buffer.seek(0)
 
                     self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
-                    self.encoder_to_others.load_state_dict(torch.load(ETO_state_dict_buffer, map_location='cuda'))
                     self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
                     break
                 except Exception:
@@ -88,7 +78,6 @@ class Worker(object):
                     time.sleep(0.1)
 
         self.market_encoder.eval()
-        self.encoder_to_others.eval()
         self.actor_critic.eval()
 
         if test:
@@ -207,9 +196,7 @@ class Worker(object):
                     else:
                         self.zeus.close_units(int(abs((desired_percent - current_percent_in)) * total_tradeable))
 
-            # change_amounts = {0:-10, 1:-5, 2:-1, 3:0, 4:1, 5:5, 6:10}
-            # change_amounts = {0:-10, 1:0, 2:10}
-            change_amounts = {0:-100, 1:-50, 2:-10, 3:-5, 4:-1, 5:0, 6:1, 7:5, 8:10, 9:50, 10:100}
+            change_amounts = {0:-10, 1:0, 2:10}
             if action in change_amounts:
                 desired_percent_in = (percent_in * self.tradeable_percentage) + (self.trade_percent * change_amounts[action])
                 desired_percent_in = np.clip(desired_percent_in, -self.tradeable_percentage, self.tradeable_percentage)
