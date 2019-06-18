@@ -14,7 +14,7 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 24
+    n_workers = 12
     server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     server.set("p_new_proposal", 1)
@@ -29,8 +29,7 @@ if __name__ == "__main__":
 
     def start_process(name, n):
         global inst_i
-        # start = np.random.randint(1136073600, 1548374400)
-        start = np.random.randint(1546300800, 1548979200)
+        start = np.random.randint(1514764800, 1546300800)
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -49,7 +48,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 5:
+            while process.is_alive() and time.time() - times[i] < 25:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

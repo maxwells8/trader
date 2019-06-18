@@ -9,7 +9,7 @@ import time
 torch.manual_seed(0)
 D_BAR = 4
 D_MODEL = 512
-WINDOW = 240
+WINDOW = 60
 P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -1126,10 +1126,10 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
 
-        self.fc_init = nn.Linear(WINDOW + 2, D_MODEL)
+        self.fc_init = nn.Linear(WINDOW * D_BAR + 2, D_MODEL)
         # self.ln_init = nn.LayerNorm(D_MODEL)
 
-        self.n_res_layers = 2
+        self.n_res_layers = 4
         self.res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_res_layers)])
 
     def forward(self, market_values, spread, percent_in):
@@ -1138,16 +1138,12 @@ class Encoder(nn.Module):
         """
         batch_size = market_values.size()[0]
 
-        market_values_ = market_values[:, :, 3]
-        spread_ = spread.view(batch_size, 1)
-        percent_in_ = percent_in.view(batch_size, 1)
+        means = market_values[:, :, 3].contiguous().view(batch_size, -1).mean(1)
+        stds = market_values[:, :, 3].contiguous().view(batch_size, -1).std(1)
+        market_values_ = (market_values - means.view(batch_size, 1, 1)) / (stds.view(batch_size, 1, 1) + 1e-9)
+        spread_ = spread / (stds + 1e-9)
 
-        means = market_values_.contiguous().view(batch_size, -1).mean(1).view(-1, 1)
-        stds = market_values_.contiguous().view(batch_size, -1).std(1).view(-1, 1)
-        market_values_ = (market_values_ - means) / (stds + 1e-9)
-        spread_ = spread_ / (stds + 1e-9)
-
-        x = torch.cat([market_values_, spread_, percent_in_], dim=1)
+        x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1)], dim=1)
 
         x = self.fc_init(x)
         # x = self.ln_init(x)
@@ -1166,12 +1162,12 @@ class ActorCritic(nn.Module):
 
         self.d_action = 3
 
-        self.n_actor_layers = 0
+        self.n_actor_layers = 1
         self.actor_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_actor_layers)])
         self.final_actor = nn.Linear(D_MODEL, self.d_action)
         self.actor_softmax = nn.Softmax(dim=1)
 
-        self.n_critic_layers = 0
+        self.n_critic_layers = 1
         self.critic_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_critic_layers)])
         self.final_critic = nn.Linear(D_MODEL, 1)
 
@@ -1188,7 +1184,7 @@ class ActorCritic(nn.Module):
         critic = x
         for layer in self.critic_layers:
             critic = layer(critic)
-        critic = self.final_critic(x)
+        critic = self.final_critic(critic)
 
         return policy, critic
 
@@ -1409,7 +1405,7 @@ class BarEmbedder(nn.Module):
 
         self.init_layer = nn.Linear(1, D_MODEL)
 
-        self.n_res_layers = 1
+        self.n_res_layers = 0
         self.res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_res_layers)])
 
         for param in [self.init_layer]:

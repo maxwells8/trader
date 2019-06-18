@@ -98,7 +98,7 @@ class Optimizer(object):
 
             self.start_step = 0
             self.start_n_samples = 0
-            self.original_actor_temp = 1
+            self.original_actor_temp = 5
             cur_meta_state = {
                 'n_samples':self.start_n_samples,
                 'steps':self.start_step,
@@ -155,20 +155,20 @@ class Optimizer(object):
                     self.queued_experience.append(experience)
                     n_experiences += 1
 
-            # get some experiences from the replay buffer
-            buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
-            n_replay = 0
-            if buffer_size > len(self.queued_experience):
-                while n_replay < len(self.queued_experience):
-                    try:
-                        buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
-                        loc = np.random.randint(0, buffer_size)
-                        experience = self.server.lindex("replay_buffer", int(loc))
-                        experience = msgpack.unpackb(experience, raw=False)
-                        self.prioritized_experience.append(experience)
-                        n_replay += 1
-                    except Exception:
-                        pass
+            # # get some experiences from the replay buffer
+            # buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
+            # n_replay = 0
+            # if buffer_size > len(self.queued_experience):
+            #     while n_replay < len(self.queued_experience):
+            #         try:
+            #             buffer_size = min(self.server.llen("replay_buffer"), int(self.server.get("replay_buffer_size").decode("utf-8")))
+            #             loc = np.random.randint(0, buffer_size)
+            #             experience = self.server.lindex("replay_buffer", int(loc))
+            #             experience = msgpack.unpackb(experience, raw=False)
+            #             self.prioritized_experience.append(experience)
+            #             n_replay += 1
+            #         except Exception:
+            #             pass
 
             experiences = self.queued_experience + self.prioritized_experience
             batch_size = len(experiences)
@@ -259,15 +259,15 @@ class Optimizer(object):
 
 
             total_loss.backward()
-            # for name, param in self.MEN.named_parameters():
-            #     print(name, param.grad)
+            # for name, param in self.ACN.named_parameters():
+            #     print(name, param.grad.std())
             self.optimizer.step()
 
             self.step += 1
             n_samples += len(self.queued_experience)
 
             try:
-                if self.step % 25 == 0:
+                if self.step % 100 == 0:
                     cur_meta_state = {
                     'n_samples':n_samples,
                     'steps':self.step,

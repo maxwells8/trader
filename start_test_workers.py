@@ -35,7 +35,7 @@ if __name__ == "__main__":
         name = "test" + name
         global n_times
         global inst_i
-        start = 1546300800
+        start = np.random.randint(1514764800, 1546300800)
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 600:
+            while process.is_alive() and time.time() - times[i] < 180:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
