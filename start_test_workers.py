@@ -29,14 +29,14 @@ if __name__ == "__main__":
     reward_tau = 0.01
     server.set("test_reward_tau", reward_tau)
     server.set("test_reward_ema", 0)
-    server.set("test_reward_emsd", -1)
+    server.set("test_reward_emsd", 0)
 
     def start_process(name):
         name = "test" + name
         global n_times
         global inst_i
-        start = np.random.randint(1514764800, 1546300800)
-        # start = np.random.randint(1546300800, 1559347200)
+        # start = np.random.randint(1514764800, 1546300800)
+        start = np.random.randint(1546300800, 1559347200)
         # start = 1546300800
 
         instrument = instruments[inst_i]
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 60:
+            while process.is_alive() and time.time() - times[i] < 240:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

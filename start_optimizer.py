@@ -22,7 +22,7 @@ server.set("weight_penalty", 1e-5)
 
 server.set("learning_rate", 1e-5)
 
-server.set("queued_batch_size", 64)
+server.set("queued_batch_size", 32)
 server.set("replay_buffer_size", 10000)
 
 import os

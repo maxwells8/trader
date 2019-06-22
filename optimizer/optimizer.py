@@ -185,8 +185,6 @@ class Optimizer(object):
             # get the inputs to the networks in the right form
             batch = Experience(*zip(*experiences))
             time_states = [*zip(*batch.time_states)]
-            for i, time_state_ in enumerate(time_states):
-                time_states[i] = torch.Tensor(time_state_).view(batch_size, 1, networks.D_BAR)
             percent_in = [*zip(*batch.percents_in)]
             trade_open = [*zip(*batch.trades_open)]
             spread = [*zip(*batch.spreads)]
@@ -194,18 +192,21 @@ class Optimizer(object):
             place_action = [*zip(*batch.place_actions)]
             reward = [*zip(*batch.rewards)]
 
-            window = len(time_states) - len(percent_in)
-            assert window == networks.WINDOW
-            assert len(percent_in) == self.trajectory_steps
+            assert len(time_states) == self.trajectory_steps
+            assert len(reward) == self.trajectory_steps - 1
 
             critic_loss = torch.Tensor([0]).cuda()
             actor_v_loss = torch.Tensor([0]).cuda()
             actor_entropy_loss = torch.Tensor([0]).cuda()
 
-            time_states_ = torch.cat(time_states[self.trajectory_steps-1:-1], dim=1).detach().cuda()
+            time_states_ = torch.Tensor(time_states[self.trajectory_steps-1]).view(batch_size, networks.WINDOW, networks.D_BAR).cuda()
             spread_ = torch.Tensor(spread[self.trajectory_steps-1]).cuda()
             percent_in_ = torch.Tensor(percent_in[self.trajectory_steps-1]).cuda()
             trade_open_ = torch.Tensor(trade_open[self.trajectory_steps-1]).cuda()
+
+            # print('<final>')
+            # print(time_states_)
+            # print('</final>')
 
             market_encoding = self.MEN.forward(time_states_, spread_, percent_in_, trade_open_)
             policy, value = self.ACN.forward(market_encoding)
@@ -214,7 +215,7 @@ class Optimizer(object):
             v_trace = value.detach()
             for i in range(self.trajectory_steps - 2, -1, -1):
 
-                time_states_ = torch.cat(time_states[i:window+i], dim=1).cuda()
+                time_states_ = torch.Tensor(time_states[i]).view(batch_size, networks.WINDOW, networks.D_BAR).cuda()
                 spread_ = torch.Tensor(spread[i]).cuda()
                 percent_in_ = torch.Tensor(percent_in[i]).cuda()
                 trade_open_ = torch.Tensor(trade_open[i]).cuda()
@@ -225,14 +226,18 @@ class Optimizer(object):
                 pi_ = policy.gather(1, torch.Tensor(place_action[i]).cuda().long().view(batch_size, 1))
                 mu_ = torch.Tensor(mu[i]).cuda().view(batch_size, 1)
 
-                r = torch.Tensor(reward[i+1]).cuda().view(batch_size, 1)
+                r = torch.Tensor(reward[i]).cuda().view(batch_size, 1)
+
+                # print('<{i}>'.format(i=i))
+                # print(place_action[i], reward[i], time_states_)
+                # print('</{i}>'.format(i=i))
 
                 if i == 0:
                     rho = torch.min(self.max_rho, pi_ / (mu_ + 1e-9))
 
                     advantage_v = r + self.gamma * v_trace - value
                     # actor_v_loss += (-torch.log(pi_ + 1e-9) * (rho * advantage_v).detach()).mean()
-                    actor_v_loss += (pi_ * (rho * advantage_v).detach()).mean()
+                    actor_v_loss += (-pi_ * (rho * advantage_v).detach()).mean()
 
                     actor_entropy_loss += (torch.log(policy + 1e-9) * policy).mean()
 

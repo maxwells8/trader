@@ -1161,7 +1161,7 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 2
+        self.d_action = 3
 
         self.n_actor_layers = 1
         self.actor_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_actor_layers)])

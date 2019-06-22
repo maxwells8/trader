@@ -30,6 +30,7 @@ if __name__ == "__main__":
     def start_process(name, n):
         global inst_i
         start = np.random.randint(1514764800, 1546300800)
+        # start = np.random.randint(1546300800, 1546905600)
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -48,7 +49,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 30:
+            while process.is_alive() and time.time() - times[i] < 15:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
