@@ -1126,13 +1126,13 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
 
-        self.fc_init = nn.Linear(WINDOW * D_BAR + 2, D_MODEL)
+        self.fc_init = nn.Linear(WINDOW * D_BAR + 3, D_MODEL)
         # self.ln_init = nn.LayerNorm(D_MODEL)
 
         self.n_res_layers = 4
         self.res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_res_layers)])
 
-    def forward(self, market_values, spread, percent_in):
+    def forward(self, market_values, spread, percent_in, trade_open):
         """
         market_values of size (batch_size, WINDOW, D_BAR)
         """
@@ -1142,8 +1142,9 @@ class Encoder(nn.Module):
         stds = market_values[:, :, 3].contiguous().view(batch_size, -1).std(1)
         market_values_ = (market_values - means.view(batch_size, 1, 1)) / (stds.view(batch_size, 1, 1) + 1e-9)
         spread_ = spread / (stds + 1e-9)
+        trade_open_ = (trade_open - means) / (stds + 1e-9)
 
-        x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1)], dim=1)
+        x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1), trade_open_.view(batch_size, 1)], dim=1)
 
         x = self.fc_init(x)
         # x = self.ln_init(x)
@@ -1160,7 +1161,7 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 3
+        self.d_action = 2
 
         self.n_actor_layers = 1
         self.actor_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_actor_layers)])

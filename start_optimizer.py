@@ -7,8 +7,8 @@ sys.path.insert(0, './optimizer')
 server_host = "192.168.0.115"
 server = redis.Redis(server_host)
 
-server.set("trajectory_steps", 4)
-server.set("gamma", 0.99)
+server.set("trajectory_steps", 2)
+server.set("gamma", 0)
 
 server.set("max_rho", 1)
 server.set("max_c", 1)
@@ -22,7 +22,7 @@ server.set("weight_penalty", 1e-5)
 
 server.set("learning_rate", 1e-5)
 
-server.set("queued_batch_size", 32)
+server.set("queued_batch_size", 64)
 server.set("replay_buffer_size", 10000)
 
 import os

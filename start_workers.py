@@ -14,7 +14,7 @@ from start_worker import start_worker
 if __name__ == "__main__":
 
     granularity = "M1"
-    n_workers = 12
+    n_workers = 24
     server_host = "192.168.0.115"
     server = redis.Redis(server_host)
     server.set("p_new_proposal", 1)
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 25:
+            while process.is_alive() and time.time() - times[i] < 30:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it
