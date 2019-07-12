@@ -96,12 +96,13 @@ class Worker(object):
         self.exp_actions = []
         self.exp_rewards = []
 
-        self.action_last_step = False
+        # self.action_last_step = False
         self.last_bar_date = -1
 
         self.total_rewards = 0
+        self.reward = 0
 
-        self.window = networks.WINDOW
+        self.window = 60 * 6
 
         self.start = start
         self.trajectory_steps = int(self.server.get("trajectory_steps").decode("utf-8"))
@@ -121,6 +122,7 @@ class Worker(object):
             self.actor_temp = 1
 
             self.trade_steps = []
+            self.rewards = []
         else:
             self.zeus = Zeus(instrument, granularity, margin=1)
             self.tradeable_percentage = 1
@@ -135,6 +137,11 @@ class Worker(object):
 
         self.long_trades = []
         self.short_trades = []
+
+        self.pos_trades = []
+        self.n_closed_early = 0
+        self.n_tp = 0
+        self.neg_trades = []
 
         self.plot = self.test and False
         if self.plot:
@@ -168,23 +175,27 @@ class Worker(object):
                 self.all_times.append(self.i_step)
                 self.all_bars.append(bar.close)
 
-            reward = 0
+            test_spread_amount = float(self.server.get("spread_amount").decode("utf-8"))
+            worker_spread_amount = float(self.server.get("spread_amount").decode("utf-8"))
 
-            test_with_spread = True
-            workers_with_spread = False
+            if self.test:
+                spread_amount = test_spread_amount
+            else:
+                spread_amount = worker_spread_amount
 
             # process short trades
             completed_trades = set()
             for i, trade in enumerate(self.short_trades):
-                trade_open = trade['open']
-                if (self.test and test_with_spread) or (not self.test and workers_with_spread):
-                    trade_open -= trade['spread']
+                trade_open = trade['open'] - (trade['spread'] * spread_amount)
 
                 if trade_open - bar.low > trade['tp']:
-                    reward += trade['tp']
+                    self.reward += trade['tp']
+                    self.pos_trades.append(trade['tp'])
+                    self.n_tp += 1
                     completed_trades.add(i)
                 if bar.high - trade_open > trade['sl']:
-                    reward -= trade['sl']
+                    self.reward -= trade['sl']
+                    self.neg_trades.append(-trade['sl'])
                     completed_trades.add(i)
 
             completed_trades = sorted(list(completed_trades))
@@ -197,15 +208,16 @@ class Worker(object):
             # process long trades
             completed_trades = set()
             for i, trade in enumerate(self.long_trades):
-                trade_open = trade['open']
-                if (self.test and test_with_spread) or (not self.test and workers_with_spread):
-                    trade_open += trade['spread']
+                trade_open = trade['open'] + (trade['spread'] * spread_amount)
 
                 if bar.high - trade_open > trade['tp']:
-                    reward += trade['tp']
+                    self.reward += trade['tp']
+                    self.pos_trades.append(trade['tp'])
+                    self.n_tp += 1
                     completed_trades.add(i)
                 if trade_open - bar.low > trade['sl']:
-                    reward -= trade['sl']
+                    self.reward -= trade['sl']
+                    self.neg_trades.append(-trade['sl'])
                     completed_trades.add(i)
 
             completed_trades = sorted(list(completed_trades))
@@ -215,213 +227,270 @@ class Worker(object):
                     self.trade_steps.append(self.i_step - self.long_trades[i]['step'])
                 del self.long_trades[i]
 
-            reward *= 1000
-            self.total_rewards += reward
+            self.reward *= 1000
+            self.total_rewards += self.reward
+
+            if self.test:
+                self.rewards.append(self.reward)
 
             percent_in = -1 * len(self.short_trades) + 1 * len(self.long_trades)
 
-            if percent_in == 0:
+            self.exp_rewards.append(self.reward)
 
-                if self.action_last_step:
-                    # print("<reward>")
-                    # print(self.i_step, reward)
-                    # print("</reward>")
+            if len(self.exp_rewards) == self.trajectory_steps:
+                del self.exp_rewards[0]
 
-                    self.exp_rewards.append(reward)
-                    self.action_last_step = False
+            self.reward = 0
 
-                    if len(self.exp_rewards) == self.trajectory_steps:
-                        del self.exp_rewards[0]
+            trade_open = bar.close
+            if len(self.short_trades) > 0:
+                trade_open = self.short_trades[0]["open"]
+            elif len(self.long_trades) > 0:
+                trade_open = self.long_trades[0]["open"]
 
-                trade_open = bar.close
-                if len(self.short_trades) > 0:
-                    trade_open = self.short_trades[0]["open"]
-                elif len(self.long_trades) > 0:
-                    trade_open = self.long_trades[0]["open"]
+            five_min_bars = []
+            i = 0
+            five_min_bar_high = float('-inf')
+            five_min_bar_low = float('inf')
+            five_min_bar = []
+            for time_state in self.time_states[:-60]:
+                time_state = time_state[0][0]
+                if i == 0:
+                    five_min_bar.append(time_state[0])
+                if time_state[1] > five_min_bar_high:
+                    five_min_bar_high = time_state[1]
+                if time_state[2] < five_min_bar_low:
+                    five_min_bar_low = time_state[2]
+                i += 1
+                if i % 5 == 0:
+                    five_min_bar.append(five_min_bar_high)
+                    five_min_bar.append(five_min_bar_low)
+                    five_min_bar.append(time_state[3])
+                    five_min_bars.append(five_min_bar)
+                    five_min_bar = []
+                    i = 0
+                    five_min_bar_high = float('-inf')
+                    five_min_bar_low = float('inf')
 
-                input_time_states = torch.Tensor(self.time_states[-self.window:]).view(1, self.window, networks.D_BAR)
-                assert torch.isnan(input_time_states).sum() == 0
+            five_min_time_states = torch.Tensor(five_min_bars).view(1, 60, 4)
+            one_min_time_states = torch.Tensor(self.time_states[-60:]).view(1, 60, 4)
+            input_time_states = torch.cat([five_min_time_states, one_min_time_states], dim=1)
+            # input_time_states = torch.Tensor(self.time_states[-self.window:]).view(1, self.window, networks.D_BAR)
+            assert torch.isnan(input_time_states).sum() == 0
 
-                market_encoding = self.market_encoder(input_time_states, torch.Tensor([bar.spread]), torch.Tensor([percent_in]), torch.Tensor([trade_open]))
-                policy, value = self.actor_critic(market_encoding, temp=self.actor_temp)
+            market_encoding = self.market_encoder(input_time_states, torch.Tensor([bar.spread]), torch.Tensor([percent_in]), torch.Tensor([trade_open]))
+            policy, value = self.actor_critic(market_encoding, temp=self.actor_temp)
 
-                if self.test and False:
-                    action = np.random.randint(0, 3)
-                    # action = torch.multinomial(policy, 1).item()
-                else:
-                    action = torch.multinomial(policy, 1).item()
+            if self.test and False:
+                action = np.random.randint(0, 3)
+                # action = torch.multinomial(policy, 1).item()
+                # action = torch.argmax(policy, 1).item()
+            else:
+                action = torch.multinomial(policy, 1).item()
 
-                # print('<input>')
-                # print(self.i_step, action, torch.Tensor(input_time_states.tolist()))
-                # print('</input>')
-
-                if self.plot:
-                    if action == 0:
-                        self.short_times.append(self.i_step)
-                        self.short_bars.append(bar.close)
-                    elif action == 1:
-                        self.long_times.append(self.i_step)
-                        self.long_bars.append(bar.close)
-
-                mu = policy[0, action].item()
-
-                self.action_last_step = True
-
-                self.exp_time_states.append(input_time_states.tolist())
-                self.exp_percents_in.append(percent_in)
-                self.exp_trades_open.append(trade_open)
-                self.exp_spreads.append(bar.spread)
-
-                if len(self.exp_time_states) == self.trajectory_steps + 1:
-                    del self.exp_time_states[0]
-                    del self.exp_percents_in[0]
-                    del self.exp_trades_open[0]
-                    del self.exp_spreads[0]
-
-                # process action
-                open = bar.close
-                spread = bar.spread
-                step = self.i_step
-                if self.test:
-                    tp = 5 / 10000
-                    sl = 5 / 10000
-                else:
-                    tp = 5 / 10000
-                    sl = 5 / 10000
-                new_trade = {'open':open, 'spread':spread, 'step':step, 'tp':tp, 'sl':sl}
-
-                max_trades = 1
-
+            if self.plot:
                 if action == 0:
-                    # if len(self.long_trades) > 0:
-                    #     trade = self.long_trades[0]
-                    #     trade_open = trade['open']
-                    #     if (self.test and test_with_spread) or (not self.test and workers_with_spread):
-                    #         trade_open += trade['spread']
-                    #
-                    #     reward += bar.close - trade_open
-                    #     del self.long_trades[0]
-                    # elif len(self.short_trades) < max_trades:
-                    #     self.short_trades.append(new_trade)
-                    if len(self.short_trades) < max_trades and len(self.long_trades) == 0:
-                        self.short_trades.append(new_trade)
-
+                    self.short_times.append(self.i_step)
+                    self.short_bars.append(bar.close)
                 elif action == 1:
-                    # if len(self.short_trades) > 0:
-                    #     trade = self.short_trades[0]
-                    #     trade_open = trade['open']
-                    #     if (self.test and test_with_spread) or (not self.test and workers_with_spread):
-                    #         trade_open -= trade['spread']
-                    #
-                    #     reward += trade_open - bar.close
-                    #     del self.short_trades[0]
-                    # elif len(self.long_trades) < max_trades:
-                    #     self.long_trades.append(new_trade)
-                    if len(self.long_trades) < max_trades and len(self.short_trades) == 0:
-                        self.long_trades.append(new_trade)
+                    self.long_times.append(self.i_step)
+                    self.long_bars.append(bar.close)
 
-                if self.test:
-                    reward_ema = self.server.get("test_reward_ema")
-                    reward_emsd = self.server.get("test_reward_emsd")
-                    if reward_ema != None:
-                        reward_ema = float(reward_ema.decode("utf-8"))
-                        reward_emsd = float(reward_emsd.decode("utf-8"))
+            mu = policy[0, action].item()
+
+            # self.action_last_step = True
+
+            self.exp_time_states.append(input_time_states.tolist())
+            self.exp_percents_in.append(percent_in)
+            self.exp_trades_open.append(trade_open)
+            self.exp_spreads.append(bar.spread)
+
+            if not self.test and len(self.exp_time_states) == self.trajectory_steps + 1:
+                del self.exp_time_states[0]
+                del self.exp_percents_in[0]
+                del self.exp_trades_open[0]
+                del self.exp_spreads[0]
+
+            # process action
+            open = bar.close
+            spread = bar.spread
+            step = self.i_step
+            if self.test and False:
+                tp = 1000 / 10000 - (spread * spread_amount)
+                sl = 1000 / 10000 + (spread * spread_amount)
+            else:
+                tp = 1000 / 10000 - (spread * spread_amount)
+                sl = 1000 / 10000 + (spread * spread_amount)
+
+            new_trade = {'open':open, 'spread':spread, 'step':step, 'tp':tp, 'sl':sl}
+
+            max_trades = 1
+
+            if action == 0:
+                if len(self.long_trades) > 0:
+                    trade = self.long_trades[0]
+                    trade_open = trade['open'] + (trade['spread'] * spread_amount)
+                    self.reward += bar.close - trade_open
+                    if (bar.close - trade_open) > 0:
+                        self.pos_trades.append(bar.close - trade_open)
+                        self.n_closed_early += 1
                     else:
-                        reward_ema = 0
-                        reward_emsd = 0
+                        self.neg_trades.append(bar.close - trade_open)
+                    del self.long_trades[0]
 
-                    print('-----------------------------------------------------------------------------')
-                    print("step: {s} \
-                    \naction: {a} \
-                    \ndirection: {dir} \
-                    \npolicy: {p} \
-                    \nvalue: {v} \
-                    \ntotal rewards: {t_r} \
-                    \nreward_ema: {ema} \
-                    \nreward_emsd: {emsd} \
-                    \nbar close: {close} \
-                    \nwindow std: {std} \
-                    \ninstrument: {ins} \
-                    \nstart: {start} \n".format(s=self.i_step,
-                                            a=action,
-                                            dir=percent_in,
-                                            p=[round(policy_, 5) for policy_ in policy[0].tolist()],
-                                            v=round(value.item(), 5),
-                                            t_r=self.total_rewards,
-                                            ema=round(reward_ema, 5),
-                                            emsd=round(reward_emsd, 5),
-                                            std=round(input_time_states[:, 0, :4].std().item(), 5),
-                                            close=bar.close,
-                                            ins=self.instrument,
-                                            start=self.start))
+                if len(self.short_trades) < max_trades and len(self.long_trades) == 0:
+                    self.short_trades.append(new_trade)
 
-                    print('-----------------------------------------------------------------------------')
-                    print('*****************************************************************************')
-                    if self.i_step % 1000 == 0:
-                        try:
-                            MEN_compressed_state_dict = self.server.get("market_encoder")
-                            ACN_compressed_state_dict = self.server.get("actor_critic")
-
-                            MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
-                            ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
-
-                            MEN_state_dict_buffer.seek(0)
-                            ACN_state_dict_buffer.seek(0)
-
-                            self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
-                            self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
-                        except Exception as e:
-                            print("Failed to load models")
-
-                if (self.steps_since_push == self.steps_between_experiences) and (not self.test) and len(self.exp_time_states) == self.trajectory_steps:
-                    experience = Experience(
-                    time_states=self.exp_time_states,
-                    percents_in=self.exp_percents_in,
-                    trades_open=self.exp_trades_open,
-                    spreads=self.exp_spreads,
-                    mus=self.exp_mus,
-                    place_actions=self.exp_actions,
-                    rewards=self.exp_rewards
-                    )
-
-                    # print('<experience>')
-                    # print(self.i_step, self.exp_actions[0], self.exp_rewards[0], torch.Tensor(self.exp_time_states[0]), torch.Tensor(self.exp_time_states[1]))
-                    # print('</experience>')
-
-                    experience = msgpack.packb(experience, use_bin_type=True)
-                    # self.add_to_replay_buffer(experience)
-                    n_experiences = self.server.llen("experience")
-                    if n_experiences > 0:
-                        try:
-                            loc = np.random.randint(0, n_experiences)
-                            ref = self.server.lindex("experience", loc)
-                            self.server.linsert("experience", "before", ref, experience)
-                        except redis.exceptions.DataError:
-                            self.server.lpush("experience", experience)
+            elif action == 1:
+                if len(self.short_trades) > 0:
+                    trade = self.short_trades[0]
+                    trade_open = trade['open'] - (trade['spread'] * spread_amount)
+                    self.reward += trade_open - bar.close
+                    if (trade_open - bar.close) > 0:
+                        self.pos_trades.append(trade_open - bar.close)
+                        self.n_closed_early += 1
                     else:
-                        self.server.lpush("experience", experience)
+                        self.neg_trades.append(trade_open - bar.close)
+                    del self.short_trades[0]
 
-                    self.n_experiences += 1
-                    self.steps_since_push = 1
+                if len(self.long_trades) < max_trades and len(self.short_trades) == 0:
+                    self.long_trades.append(new_trade)
 
-                    self.exp_time_states = []
-                    self.exp_percents_in = []
-                    self.exp_trades_open = []
-                    self.exp_spreads = []
-                    self.exp_mus = []
-                    self.exp_actions = []
-                    self.exp_rewards = []
-                    self.action_last_step = False
+            elif action == 2:
+                while len(self.short_trades) > 0:
+                    trade = self.short_trades[0]
+                    trade_open = trade['open'] - (trade['spread'] * spread_amount)
+                    self.reward += trade_open - bar.close
+                    if (trade_open - bar.close) > 0:
+                        self.pos_trades.append(trade_open - bar.close)
+                        self.n_closed_early += 1
+                    else:
+                        self.neg_trades.append(trade_open - bar.close)
+                    del self.short_trades[0]
 
+                while len(self.long_trades) > 0:
+                    trade = self.long_trades[0]
+                    trade_open = trade['open'] + (trade['spread'] * spread_amount)
+                    self.reward += bar.close - trade_open
+                    if (bar.close - trade_open) > 0:
+                        self.pos_trades.append(bar.close - trade_open)
+                        self.n_closed_early += 1
+                    else:
+                        self.neg_trades.append(bar.close - trade_open)
+                    del self.long_trades[0]
+
+            if self.test:
+                reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
+                reward_ema = self.server.get("test_reward_ema")
+                reward_emsd = self.server.get("test_reward_emsd")
+                if reward_ema != None:
+                    reward_ema = float(reward_ema.decode("utf-8"))
+                    reward_emsd = float(reward_emsd.decode("utf-8"))
                 else:
-                    self.steps_since_push += 1
-                    self.action_last_step = True
+                    reward_ema = 0
+                    reward_emsd = 0
 
-                    self.exp_actions.append(action)
-                    self.exp_mus.append(mu)
-                    if len(self.exp_actions) == self.trajectory_steps:
-                        del self.exp_actions[0]
-                        del self.exp_mus[0]
+                p_pos = (np.array(self.rewards) > 0).sum() / (np.array(self.rewards) != 0).sum()
+                print("n trades:", len(self.pos_trades + self.neg_trades))
+                print("n tp, n closed early:", self.n_tp, self.n_closed_early)
+                print("p_pos:", p_pos)
+                print("spread mean:", np.mean(self.exp_spreads) * 10000)
+                print("pos mean:", np.mean(self.pos_trades) * 10000)
+                print("neg mean:", np.mean(self.neg_trades) * 10000)
+                print("sum all:", np.sum(self.pos_trades + self.neg_trades) * 10000)
+                print("with spread at 100%:", np.sum(np.array(self.pos_trades + self.neg_trades) - np.mean(self.exp_spreads)) * 10000)
+                print('-----------------------------------------------------------------------------')
+                print("step: {s} \
+                \naction: {a} \
+                \ndirection: {dir} \
+                \npolicy: {p} \
+                \nvalue: {v} \
+                \ntotal rewards: {t_r} \
+                \nreward_ema: {ema} \
+                \nreward_emsd: {emsd} \
+                \n1/tau: {tau} \
+                \nspread amount: {sa} \
+                \nbar close: {close} \
+                \nwindow std: {std} \
+                \ninstrument: {ins} \
+                \nstart: {start} \n".format(s=self.i_step,
+                                        a=action,
+                                        dir=percent_in,
+                                        p=[round(policy_, 5) for policy_ in policy[0].tolist()],
+                                        v=round(value.item(), 5),
+                                        t_r=self.total_rewards,
+                                        ema=round(reward_ema, 5),
+                                        emsd=round(reward_emsd, 5),
+                                        tau=round(1/reward_tau, 5),
+                                        sa=round(spread_amount, 5),
+                                        std=round(np.std([ts[0][0][3] for ts in self.time_states[-self.window:]]), 5),
+                                        close=bar.close,
+                                        ins=self.instrument,
+                                        start=self.start))
+
+                print('-----------------------------------------------------------------------------')
+                print('*****************************************************************************')
+                # if self.i_step % 1000 == 0:
+                #     try:
+                #         MEN_compressed_state_dict = self.server.get("market_encoder")
+                #         ACN_compressed_state_dict = self.server.get("actor_critic")
+                #
+                #         MEN_state_dict_buffer = pickle.loads(MEN_compressed_state_dict)
+                #         ACN_state_dict_buffer = pickle.loads(ACN_compressed_state_dict)
+                #
+                #         MEN_state_dict_buffer.seek(0)
+                #         ACN_state_dict_buffer.seek(0)
+                #
+                #         self.market_encoder.load_state_dict(torch.load(MEN_state_dict_buffer, map_location='cuda'))
+                #         self.actor_critic.load_state_dict(torch.load(ACN_state_dict_buffer, map_location='cuda'))
+                #     except Exception as e:
+                #         print("Failed to load models")
+
+            if (self.steps_since_push == self.steps_between_experiences) and (not self.test) and len(self.exp_time_states) == self.trajectory_steps:
+                experience = Experience(
+                time_states=self.exp_time_states,
+                percents_in=self.exp_percents_in,
+                trades_open=self.exp_trades_open,
+                spreads=self.exp_spreads,
+                mus=self.exp_mus,
+                place_actions=self.exp_actions,
+                rewards=self.exp_rewards
+                )
+
+                experience = msgpack.packb(experience, use_bin_type=True)
+                # self.add_to_replay_buffer(experience)
+                n_experiences = self.server.llen("experience")
+                if n_experiences > 0:
+                    try:
+                        loc = np.random.randint(0, n_experiences)
+                        ref = self.server.lindex("experience", loc)
+                        self.server.linsert("experience", "before", ref, experience)
+                    except redis.exceptions.DataError:
+                        self.server.lpush("experience", experience)
+                else:
+                    self.server.lpush("experience", experience)
+
+                self.n_experiences += 1
+                self.steps_since_push = 1
+
+                self.exp_time_states = []
+                self.exp_percents_in = []
+                self.exp_trades_open = []
+                self.exp_spreads = []
+                self.exp_mus = []
+                self.exp_actions = []
+                self.exp_rewards = []
+                # self.action_last_step = False
+
+            else:
+                self.steps_since_push += 1
+                # self.action_last_step = True
+
+                self.exp_actions.append(action)
+                self.exp_mus.append(mu)
+                if len(self.exp_actions) == self.trajectory_steps:
+                    del self.exp_actions[0]
+                    del self.exp_mus[0]
 
             self.i_step += 1
 
@@ -477,13 +546,24 @@ class Worker(object):
             reward_tau = float(self.server.get("test_reward_tau").decode("utf-8"))
             reward_ema = float(self.server.get("test_reward_ema").decode("utf-8"))
             reward_emsd = float(self.server.get("test_reward_emsd").decode("utf-8"))
-            if reward_emsd == -1:
-                self.server.set("test_reward_ema", self.total_rewards)
-                self.server.set("test_reward_emsd", 0)
-            else:
-                delta = self.total_rewards - reward_ema
-                self.server.set("test_reward_ema", reward_ema + reward_tau * delta)
-                self.server.set("test_reward_emsd", math.sqrt((1 - reward_tau) * (reward_emsd**2 + reward_tau * (delta**2))))
+
+            delta = self.total_rewards - reward_ema
+            new_reward_ema = reward_ema + reward_tau * delta
+            new_reward_emsd = math.sqrt((1 - reward_tau) * (reward_emsd**2 + reward_tau * (delta**2)))
+            new_reward_tau = max(1 / ((1 / reward_tau) + 1), 0.01)
+            # spread_amount = float(self.server.get("spread_amount").decode("utf-8"))
+            # new_spread_amount = min(1, spread_amount + 0.25)
+            #
+            # if new_reward_tau == 0.1 and new_reward_ema > 5 and spread_amount < 1:
+            #     self.server.set("spread_amount", new_spread_amount)
+            #     new_reward_ema = 0
+            #     new_reward_emsd = 0
+            #     new_reward_tau = 1
+
+            self.server.set("test_reward_ema", new_reward_ema)
+            self.server.set("test_reward_emsd", new_reward_emsd)
+            self.server.set("test_reward_tau", new_reward_tau)
+
 
         quit()
 

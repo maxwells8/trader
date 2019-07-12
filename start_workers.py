@@ -17,7 +17,7 @@ if __name__ == "__main__":
     n_workers = 24
     server_host = "192.168.0.115"
     server = redis.Redis(server_host)
-    server.set("p_new_proposal", 1)
+    server.set("spread_amount", 0)
     n_steps = int(server.get("trajectory_steps").decode("utf-8"))
     # instruments = ["EUR_USD", "GBP_USD", "AUD_USD", "NZD_USD"]
     instruments = ["EUR_USD"]
@@ -29,8 +29,7 @@ if __name__ == "__main__":
 
     def start_process(name, n):
         global inst_i
-        start = np.random.randint(1514764800, 1546300800)
-        # start = np.random.randint(1546300800, 1546905600)
+        start = np.random.randint(1136073600, 1546300800)
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)
@@ -49,7 +48,7 @@ if __name__ == "__main__":
 
     while True:
         for i, process in enumerate(processes):
-            while process.is_alive() and time.time() - times[i] < 15:
+            while process.is_alive() and time.time() - times[i] < 30:
                 time.sleep(0.1)
             if process.is_alive():
                 # doing process.terminate() will for whatever reason make it

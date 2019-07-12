@@ -26,8 +26,7 @@ if __name__ == "__main__":
         server.set("test_ema_" + inst, 0)
         server.set("test_emsd_" + inst, 0)
 
-    reward_tau = 0.01
-    server.set("test_reward_tau", reward_tau)
+    server.set("test_reward_tau", 1)
     server.set("test_reward_ema", 0)
     server.set("test_reward_emsd", 0)
 
@@ -35,9 +34,8 @@ if __name__ == "__main__":
         name = "test" + name
         global n_times
         global inst_i
-        # start = np.random.randint(1514764800, 1546300800)
-        start = np.random.randint(1546300800, 1559347200)
-        # start = 1546300800
+        start = np.random.randint(1136073600, 1546300800)
+        # start = np.random.randint(1546300800, 1559347200)
 
         instrument = instruments[inst_i]
         inst_i = (inst_i + 1) % len(instruments)

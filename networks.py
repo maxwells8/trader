@@ -9,7 +9,7 @@ import time
 torch.manual_seed(0)
 D_BAR = 4
 D_MODEL = 512
-WINDOW = 60
+WINDOW = 120
 P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -1126,7 +1126,7 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
 
-        self.fc_init = nn.Linear(WINDOW * D_BAR + 3, D_MODEL)
+        self.fc_init = nn.Linear(WINDOW * D_BAR + 2, D_MODEL)
         # self.ln_init = nn.LayerNorm(D_MODEL)
 
         self.n_res_layers = 4
@@ -1144,7 +1144,8 @@ class Encoder(nn.Module):
         spread_ = spread / (stds + 1e-9)
         trade_open_ = (trade_open - means) / (stds + 1e-9)
 
-        x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1), trade_open_.view(batch_size, 1)], dim=1)
+        # x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1), trade_open_.view(batch_size, 1)], dim=1)
+        x = torch.cat([market_values_.view(batch_size, -1), spread_.view(batch_size, 1), percent_in.view(batch_size, 1)], dim=1)
 
         x = self.fc_init(x)
         # x = self.ln_init(x)
@@ -1161,7 +1162,7 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
 
-        self.d_action = 3
+        self.d_action = 4
 
         self.n_actor_layers = 1
         self.actor_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_actor_layers)])

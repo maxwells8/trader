@@ -7,8 +7,8 @@ sys.path.insert(0, './optimizer')
 server_host = "192.168.0.115"
 server = redis.Redis(server_host)
 
-server.set("trajectory_steps", 2)
-server.set("gamma", 0)
+server.set("trajectory_steps", 5)
+server.set("gamma", 0.99)
 
 server.set("max_rho", 1)
 server.set("max_c", 1)
