@@ -46,10 +46,10 @@ class Worker(object):
         # for name, param in self.generator.named_parameters():
         #     print(param.std(), name)
 
-        self.n_future_samples = 1
+        self.n_future_samples = 100
         self.n_steps_future = 10
 
-        self.plot = 1
+        self.plot = 0
 
         self.step = 0
 

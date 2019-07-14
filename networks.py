@@ -9,7 +9,7 @@ import time
 torch.manual_seed(0)
 D_BAR = 4
 D_MODEL = 512
-WINDOW = 120
+WINDOW = 180
 P_DROPOUT = 0
 # torch.cuda.manual_seed(0)
 # torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -1544,7 +1544,7 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
 
         self.n_future = 10
-        self.enc_dim = 8
+        self.enc_dim = 16
         self.init_generator = nn.Sequential(
                                 nn.Linear(WINDOW + 2 * self.n_future, D_MODEL),
                                 nn.LayerNorm(D_MODEL),
@@ -1568,6 +1568,8 @@ class Generator(nn.Module):
                                 *self.init_generator_res_layers,
                                 self.init_enc,
                             )
+        self.enc_to_mu = nn.Linear(self.enc_dim, self.enc_dim)
+        self.enc_to_sigma = nn.Linear(self.enc_dim, self.enc_dim)
 
         # self.enc_ln = nn.LayerNorm(self.enc_dim)
         # self.enc_noise_ln = nn.LayerNorm(self.enc_dim)
@@ -1578,7 +1580,9 @@ class Generator(nn.Module):
         #                         self.final_generator,
         #                     )
         self.enc_to_final = nn.Sequential(
-                                nn.Linear(self.enc_dim, 1)
+                                nn.Linear(self.enc_dim, D_MODEL),
+                                nn.LeakyReLU(),
+                                nn.Linear(D_MODEL, 1)
                             )
 
     def forward(self, market_values):
@@ -1601,10 +1605,10 @@ class Generator(nn.Module):
             one_hot[:, i_gen] = 1
             enc = self.init_to_enc(torch.cat([market_values] + generated + [one_hot], dim=1))
 
-            # enc = self.enc_ln(enc)
-            noise = torch.normal(torch.zeros_like(enc), torch.ones_like(enc))
-            enc = enc + noise
-            # enc = self.enc_noise_ln(enc)
+            mu = self.enc_to_mu(enc)
+            sigma = torch.log(1 + torch.exp(self.enc_to_sigma(enc)))
+            z = torch.normal(torch.zeros_like(mu), torch.ones_like(sigma))
+            enc = (z * sigma) + mu
 
             gen = self.enc_to_final(enc)
 
@@ -1703,9 +1707,9 @@ class DiscDecoder(nn.Module):
 #         return disc
 
 
-class Discriminator(nn.Module):
+class ConditionedDiscriminator(nn.Module):
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super(ConditionedDiscriminator, self).__init__()
 
         self.n_future = 10
         self.init_fc = nn.Linear(WINDOW + self.n_future, D_MODEL)
@@ -1738,6 +1742,47 @@ class Discriminator(nn.Module):
 
         for layer in self.fc_res_layers:
             disc = layer(disc)
+        disc = self.fc_disc(disc)
+        disc = torch.sigmoid(disc)
+
+        return disc
+
+class UnconditionedDiscriminator(nn.Module):
+    def __init__(self):
+        super(UnconditionedDiscriminator, self).__init__()
+
+        self.n_future = 10
+        self.init_fc = nn.Linear(self.n_future, D_MODEL)
+        self.init_ln = nn.LayerNorm(D_MODEL)
+
+        self.n_fc_res_layers = 2
+        self.fc_res_layers = nn.ModuleList([FCResLayer() for _ in range(self.n_fc_res_layers)])
+        self.fc_disc = nn.Linear(D_MODEL, 1)
+
+        for param in [self.init_fc, self.fc_disc]:
+            nn.init.normal_(param.weight, mean=0, std=0.02)
+            nn.init.normal_(param.bias, mean=0, std=0.02)
+
+    def forward(self, query):
+        """
+        query of size (batch_size, n_future)
+        """
+        device = query.device
+        batch_size = query.size()[0]
+        seq_len = query.size()[1]
+
+        inputs = query.view(batch_size, seq_len)
+        means = inputs.contiguous().view(batch_size, -1).mean(1).view(-1, 1)
+        stds = inputs.contiguous().view(batch_size, -1).std(1).view(-1, 1)
+        inputs = (inputs - means) / (stds + 1e-9)
+
+        disc = self.init_fc(inputs)
+        disc = self.init_ln(disc)
+        disc = F.leaky_relu(disc)
+
+        for layer in self.fc_res_layers:
+            disc = layer(disc)
+
         disc = self.fc_disc(disc)
         disc = torch.sigmoid(disc)
 
